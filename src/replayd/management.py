@@ -228,11 +228,12 @@ def create_management_app(
         project_id: str | None = Query(default=None),
     ) -> dict[str, object]:
         store: Storage = request.app.state.storage
+        scope = await resolve_read_scope(store, request.state.principal)
         project_ids = await resolve_list_project_ids_filter(
             store,
             request.state.principal,
             project_id,
-            None,
+            scope,
         )
         items = await store.list_exchanges(
             limit=limit,

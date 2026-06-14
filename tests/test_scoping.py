@@ -159,6 +159,56 @@ async def test_scoped_users_see_only_their_runs_and_tests(
 
 
 @pytest.mark.asyncio
+async def test_scoped_user_cannot_list_other_tenant_exchanges_without_project_id(
+    core_storage: Storage,
+    rsa_keypair: tuple[object, object],
+    tmp_path: Path,
+) -> None:
+    private_key, public_key = rsa_keypair
+    settings = _oidc_settings(tmp_path)
+    client, app = _management_client(
+        core_storage,
+        settings,
+        _verifier_for_public_key(settings, public_key),
+    )
+
+    subject_a = f"scope-ex-a-{uuid.uuid4().hex[:8]}"
+    subject_b = f"scope-ex-b-{uuid.uuid4().hex[:8]}"
+    _, project_a = await _provision_user(core_storage, subject=subject_a, email="ex-a@example.com")
+    await _provision_user(core_storage, subject=subject_b, email="ex-b@example.com")
+
+    run_a = f"run-ex-a-{uuid.uuid4().hex}"
+    exchange_a = f"exchange-ex-a-{uuid.uuid4().hex}"
+    await core_storage.save_exchange(
+        _sample_exchange(
+            exchange_id=exchange_a,
+            run_id=run_a,
+            project_id=project_a,
+        )
+    )
+
+    token_a = _mint_jwt(private_key, sub=subject_a, email="ex-a@example.com")
+    token_b = _mint_jwt(private_key, sub=subject_b, email="ex-b@example.com")
+    headers_a = {"Authorization": f"Bearer {token_a}"}
+    headers_b = {"Authorization": f"Bearer {token_b}"}
+
+    async with app.router.lifespan_context(app):
+        async with client:
+            own = await client.get("/api/exchanges", headers=headers_a)
+            other = await client.get("/api/exchanges", headers=headers_b)
+
+    assert own.status_code == 200
+    own_payload = own.json()
+    assert own_payload["total"] == 1
+    assert own_payload["items"][0]["id"] == exchange_a
+
+    assert other.status_code == 200
+    other_payload = other.json()
+    assert other_payload["total"] == 0
+    assert other_payload["items"] == []
+
+
+@pytest.mark.asyncio
 async def test_scoped_user_gets_404_for_other_users_details(
     core_storage: Storage,
     rsa_keypair: tuple[object, object],
