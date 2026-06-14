@@ -18,6 +18,7 @@ from replayd.control_auth import (
     log_unprotected_api_warning,
     oidc_configured,
 )
+from replayd.auth.me import build_me_profile
 from replayd.auth.oidc import OidcVerifier
 from replayd.auth.principal import Principal
 from replayd.auth.invitations import (
@@ -232,6 +233,11 @@ def create_management_app(
                 status_code=503,
                 content={"status": "error", "detail": str(exc)},
             )
+
+    @app.get("/api/me")
+    async def get_me(request: Request) -> dict[str, object]:
+        store: Storage = request.app.state.storage
+        return await build_me_profile(store, request.state.principal)
 
     @app.get("/api/exchanges")
     async def list_exchanges(

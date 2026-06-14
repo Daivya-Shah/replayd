@@ -39,6 +39,7 @@ class AuthenticationError(Exception):
 class Principal(BaseModel):
     kind: Literal["user", "service", "anonymous"]
     user_id: str | None = None
+    email_verified: bool | None = None
 
 
 def auth_configured(settings: Settings) -> bool:
@@ -119,7 +120,11 @@ async def provision_user_principal(
             login_email=email,
         )
         await ensure_user_tenant(storage, existing)
-        return Principal(kind="user", user_id=existing.id)
+        return Principal(
+            kind="user",
+            user_id=existing.id,
+            email_verified=email_verified,
+        )
 
     user = User(
         id=uuid.uuid4().hex,
@@ -136,7 +141,11 @@ async def provision_user_principal(
         login_email=email,
     )
     await ensure_user_tenant(storage, user)
-    return Principal(kind="user", user_id=user.id)
+    return Principal(
+        kind="user",
+        user_id=user.id,
+        email_verified=email_verified,
+    )
 
 
 async def resolve_principal(

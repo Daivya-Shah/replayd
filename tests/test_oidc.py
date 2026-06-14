@@ -176,7 +176,11 @@ async def test_valid_jwt_yields_user_principal(
 
     principal = await resolve_principal(request, core_storage, settings, verifier)
 
-    assert principal == Principal(kind="user", user_id=principal.user_id)
+    assert principal == Principal(
+        kind="user",
+        user_id=principal.user_id,
+        email_verified=True,
+    )
     assert principal.user_id is not None
     user = await core_storage.get_user_by_subject("principal-sub-1")
     assert user is not None
