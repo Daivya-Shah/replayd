@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>replayd — reproduce any agent failure in one click</title>
+  <meta name="description" content="A transparent proxy that records every step of your LLM agent runs for deterministic replay, branching, and regression testing." />
+  <style>
+    :root {
+      --bg: #09090b;
+      --bg-elevated: #18181b;
+      --bg-subtle: #0f0f11;
+      --border: #27272a;
+      --border-subtle: #3f3f46;
+      --text: #fafafa;
+      --text-muted: #a1a1aa;
+      --text-dim: #71717a;
+      --accent: #e4e4e7;
+      --accent-hover: #ffffff;
+      --code-bg: #0c0c0e;
+      --max-width: 44rem;
+      --page-width: 72rem;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      font-size: 1rem;
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    a {
+      color: inherit;
+      text-decoration: none;
+    }
+
+    .page {
+      max-width: var(--page-width);
+      margin: 0 auto;
+      padding: 0 1.5rem;
+    }
+
+    /* —— Hero —— */
+    .hero {
+      padding: 5rem 0 4rem;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .wordmark {
+      font-size: 0.875rem;
+      font-weight: 600;
+      letter-spacing: -0.02em;
+      color: var(--text);
+      margin-bottom: 2rem;
+    }
+
+    .hero h1 {
+      font-size: clamp(2rem, 5vw, 2.75rem);
+      font-weight: 600;
+      letter-spacing: -0.03em;
+      line-height: 1.15;
+      margin: 0 0 1.25rem;
+      max-width: 20ch;
+    }
+
+    .hero .subhead {
+      font-size: 1.125rem;
+      line-height: 1.65;
+      color: var(--text-muted);
+      margin: 0 0 2rem;
+      max-width: 42rem;
+    }
+
+    .cta-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+      align-items: center;
+      margin-bottom: 1.25rem;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      height: 2.5rem;
+      padding: 0 1.25rem;
+      font-size: 0.875rem;
+      font-weight: 500;
+      border-radius: 0.375rem;
+      border: 1px solid transparent;
+      transition: background 0.15s, border-color 0.15s, color 0.15s;
+      cursor: pointer;
+    }
+
+    .btn-primary {
+      background: var(--accent);
+      color: var(--bg);
+      border-color: var(--accent);
+    }
+
+    .btn-primary:hover {
+      background: var(--accent-hover);
+      border-color: var(--accent-hover);
+    }
+
+    .btn-secondary {
+      background: transparent;
+      color: var(--text);
+      border-color: var(--border-subtle);
+    }
+
+    .btn-secondary:hover {
+      background: var(--bg-elevated);
+      border-color: var(--text-dim);
+    }
+
+    .trust-line {
+      font-size: 0.8125rem;
+      color: var(--text-dim);
+      margin: 0;
+    }
+
+    /* —— Sections —— */
+    section {
+      padding: 3.5rem 0;
+      border-bottom: 1px solid var(--border);
+    }
+
+    section:last-of-type {
+      border-bottom: none;
+    }
+
+    .section-label {
+      font-size: 0.75rem;
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-dim);
+      margin: 0 0 0.75rem;
+    }
+
+    h2 {
+      font-size: 1.25rem;
+      font-weight: 600;
+      letter-spacing: -0.02em;
+      margin: 0 0 1rem;
+    }
+
+    .prose {
+      color: var(--text-muted);
+      margin: 0;
+      max-width: var(--max-width);
+    }
+
+    .prose + .prose {
+      margin-top: 0.75rem;
+    }
+
+    /* —— Steps —— */
+    .steps {
+      list-style: none;
+      margin: 1.5rem 0 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 1.75rem;
+    }
+
+    .step {
+      display: grid;
+      grid-template-columns: 1.75rem 1fr;
+      gap: 0 1rem;
+      align-items: start;
+    }
+
+    .step-num {
+      font-family: ui-monospace, "Cascadia Code", "Segoe UI Mono", monospace;
+      font-size: 0.75rem;
+      color: var(--text-dim);
+      padding-top: 0.15rem;
+    }
+
+    .step-body p {
+      margin: 0 0 0.5rem;
+      color: var(--text-muted);
+      font-size: 0.9375rem;
+      line-height: 1.6;
+    }
+
+    code, .code-inline {
+      font-family: ui-monospace, "Cascadia Code", "Segoe UI Mono", monospace;
+      font-size: 0.8125rem;
+    }
+
+    .code-inline {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 0.25rem;
+      padding: 0.125rem 0.375rem;
+      color: var(--text);
+    }
+
+    /* —— Feature cards —— */
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+      gap: 1rem;
+      margin-top: 1.5rem;
+    }
+
+    .card {
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      border-radius: 0.5rem;
+      padding: 1.25rem 1.25rem 1.125rem;
+    }
+
+    .card h3 {
+      font-size: 0.9375rem;
+      font-weight: 600;
+      margin: 0 0 0.5rem;
+      letter-spacing: -0.01em;
+    }
+
+    .card p {
+      margin: 0;
+      font-size: 0.875rem;
+      line-height: 1.55;
+      color: var(--text-muted);
+    }
+
+    /* —— Trust list —— */
+    .trust-list {
+      margin: 1rem 0 0;
+      padding: 0;
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+      max-width: var(--max-width);
+    }
+
+    .trust-list li {
+      padding-left: 1rem;
+      border-left: 2px solid var(--border-subtle);
+      color: var(--text-muted);
+      font-size: 0.9375rem;
+      line-height: 1.6;
+    }
+
+    .trust-list strong {
+      color: var(--text);
+      font-weight: 500;
+    }
+
+    /* —— Quickstart —— */
+    #quickstart {
+      padding-bottom: 4rem;
+    }
+
+    pre {
+      margin: 1.25rem 0 1rem;
+      padding: 1.25rem 1.5rem;
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 0.5rem;
+      overflow-x: auto;
+      font-family: ui-monospace, "Cascadia Code", "Segoe UI Mono", monospace;
+      font-size: 0.8125rem;
+      line-height: 1.7;
+      color: var(--text);
+    }
+
+    .quickstart-note {
+      font-size: 0.875rem;
+      color: var(--text-muted);
+      margin: 0;
+    }
+
+    .quickstart-note a {
+      color: var(--text);
+      text-decoration: underline;
+      text-underline-offset: 3px;
+      text-decoration-color: var(--border-subtle);
+    }
+
+    .quickstart-note a:hover {
+      text-decoration-color: var(--text-dim);
+    }
+
+    /* —— Footer —— */
+    footer {
+      padding: 2rem 0 3rem;
+      border-top: 1px solid var(--border);
+    }
+
+    .footer-inner {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem 1.5rem;
+      align-items: center;
+      font-size: 0.8125rem;
+      color: var(--text-dim);
+    }
+
+    .footer-inner a:hover {
+      color: var(--text-muted);
+    }
+
+    .footer-sep {
+      color: var(--border-subtle);
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <header class="hero">
+      <div class="wordmark">replayd</div>
+      <h1>Reproduce any agent failure in one click.</h1>
+      <p class="subhead">
+        A transparent proxy that records every step of your LLM agent's runs, so you can replay, branch, and regression-test them — deterministically, offline.
+      </p>
+      <div class="cta-row">
+        <a class="btn btn-primary" href="#quickstart">Quickstart</a>
+        <a class="btn btn-secondary" href="#">View on GitHub</a>
+      </div>
+      <p class="trust-line">Open source · self-hosted · your API key is never stored.</p>
+    </header>
+
+    <section id="problem">
+      <p class="section-label">The problem</p>
+      <h2>Production failures you cannot replay are failures you cannot fix.</h2>
+      <p class="prose">
+        LLM agents fail nondeterministically in production. Request logs show fragments, not the full trajectory. Without a byte-faithful recording of each step, you cannot reliably reproduce the exact run, inspect what the model returned, or prove a fix does not regress.
+      </p>
+    </section>
+
+    <section id="how-it-works">
+      <p class="section-label">How it works</p>
+      <h2>Three steps from capture to debug.</h2>
+      <ol class="steps">
+        <li class="step">
+          <span class="step-num">01</span>
+          <div class="step-body">
+            <p>Point your agent's OpenAI-compatible client at replayd. Every request and response is captured transparently — your agent behaves as if it were talking to the provider directly.</p>
+            <code class="code-inline">base_url="http://localhost:8787/v1"</code>
+          </div>
+        </li>
+        <li class="step">
+          <span class="step-num">02</span>
+          <div class="step-body">
+            <p>Open the dashboard to browse runs step by step. Inspect request bodies, response bodies, latency, and model metadata for any exchange in the recording.</p>
+          </div>
+        </li>
+        <li class="step">
+          <span class="step-num">03</span>
+          <div class="step-body">
+            <p>Replay a run deterministically from storage with no upstream API calls, or branch from a parent run to change one step and execute the rest live against the model.</p>
+          </div>
+        </li>
+      </ol>
+    </section>
+
+    <section id="features">
+      <p class="section-label">Capabilities</p>
+      <h2>Built for agent reliability work.</h2>
+      <div class="cards">
+        <article class="card">
+          <h3>Deterministic replay</h3>
+          <p>Re-run agent logic against recorded responses. Same inputs produce the same outputs — no network, no drift.</p>
+        </article>
+        <article class="card">
+          <h3>Branch and test</h3>
+          <p>Change a prompt, model, or tool at one step; replay matching steps from the parent and go live on divergence.</p>
+        </article>
+        <article class="card">
+          <h3>Semantic regression tests</h3>
+          <p>Pin a baseline run and compare fresh recordings. Tolerates wording changes; catches real behavioral drift in tool calls and finish reasons.</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="trust">
+      <p class="section-label">Trust</p>
+      <h2>Your infrastructure, your data.</h2>
+      <ul class="trust-list">
+        <li><strong>Bring your own key.</strong> The agent sends its provider API key on each request. replayd forwards it upstream, redacts it from stored headers, and never persists or bills for model usage.</li>
+        <li><strong>Open source and self-hostable.</strong> Proxy, control plane, and dashboard run entirely in your environment. One command with Docker Compose; no external dependencies beyond your LLM provider.</li>
+      </ul>
+    </section>
+
+    <section id="quickstart">
+      <p class="section-label">Quickstart</p>
+      <h2>Running locally in under a minute.</h2>
+      <pre><code>git clone &lt;repo&gt;
+cd replayd
+docker compose up --build</code></pre>
+      <p class="quickstart-note">
+        Dashboard at <a href="http://localhost:3000">http://localhost:3000</a> · point your agent at <a href="http://localhost:8787/v1">http://localhost:8787/v1</a>
+      </p>
+    </section>
+
+    <footer>
+      <div class="footer-inner">
+        <span>replayd</span>
+        <span class="footer-sep">·</span>
+        <span>open source</span>
+        <span class="footer-sep">·</span>
+        <a href="#">GitHub</a>
+      </div>
+    </footer>
+  </div>
+</body>
+</html>
