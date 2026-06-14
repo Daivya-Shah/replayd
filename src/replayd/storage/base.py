@@ -427,6 +427,22 @@ class Storage(ABC):
 
     @abstractmethod
 
+    async def remove_membership(self, org_id: str, user_id: str) -> bool:
+
+        """Remove a user's membership from an org. Returns True if a row was deleted."""
+
+
+
+    @abstractmethod
+
+    async def count_owners(self, org_id: str) -> int:
+
+        """Return how many owner-role members belong to the org."""
+
+
+
+    @abstractmethod
+
     async def create_invitation(
 
         self,

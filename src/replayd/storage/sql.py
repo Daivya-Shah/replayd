@@ -676,6 +676,35 @@ class SqlStorage(Storage):
                 )
             return members
 
+    async def remove_membership(self, org_id: str, user_id: str) -> bool:
+        session_factory = self._require_session_factory()
+        async with session_factory() as session:
+            result = await session.execute(
+                select(MembershipRow).where(
+                    MembershipRow.org_id == org_id,
+                    MembershipRow.user_id == user_id,
+                )
+            )
+            row = result.scalar_one_or_none()
+            if row is None:
+                return False
+            await session.delete(row)
+            await session.commit()
+            return True
+
+    async def count_owners(self, org_id: str) -> int:
+        session_factory = self._require_session_factory()
+        async with session_factory() as session:
+            result = await session.execute(
+                select(func.count())
+                .select_from(MembershipRow)
+                .where(
+                    MembershipRow.org_id == org_id,
+                    MembershipRow.role == "owner",
+                )
+            )
+            return int(result.scalar_one())
+
     async def create_invitation(
         self,
         *,

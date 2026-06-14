@@ -29,6 +29,7 @@ from replayd.auth.invitations import (
     org_member_to_json,
     revoke_invitation_for_principal,
 )
+from replayd.auth.members import remove_member_for_principal
 from replayd.auth.projects import (
     create_project_for_principal,
     get_project_for_principal,
@@ -508,6 +509,12 @@ def create_management_app(
             "items": [org_member_to_json(item) for item in items],
             "total": len(items),
         }
+
+    @app.delete("/api/members/{user_id}", status_code=204)
+    async def remove_member(user_id: str, request: Request) -> Response:
+        store: Storage = request.app.state.storage
+        await remove_member_for_principal(store, request.state.principal, user_id)
+        return Response(status_code=204)
 
     @app.post("/api/ingest-keys", status_code=201)
     async def create_ingest_key(
