@@ -63,3 +63,18 @@ async def resolve_ingest_key_list_project_ids(
     if principal.kind == "anonymous":
         return [DEFAULT_PROJECT_ID]
     return None
+
+
+async def resolve_list_project_ids_filter(
+    storage: Storage,
+    principal: Principal,
+    project_id: str | None,
+    default_project_ids: Sequence[str] | None,
+) -> Sequence[str] | None:
+    """Apply an optional project_id query filter on top of the default list scope."""
+    if project_id is None:
+        return default_project_ids
+    from replayd.auth.projects import get_project_for_principal
+
+    await get_project_for_principal(storage, principal, project_id)
+    return [project_id]

@@ -22,6 +22,7 @@ from replayd.auth.oidc import OidcVerifier
 from replayd.auth.principal import Principal
 from replayd.auth.projects import (
     create_project_for_principal,
+    get_project_for_principal,
     list_projects_for_principal,
     project_to_json,
     rename_project_for_principal,
@@ -31,6 +32,7 @@ from replayd.auth.scoping import (
     project_id_in_read_scope,
     regression_test_in_read_scope,
     resolve_ingest_key_list_project_ids,
+    resolve_list_project_ids_filter,
     resolve_read_scope,
     resolved_project_id,
     run_steps_in_read_scope,
@@ -99,15 +101,15 @@ async def _resolve_ingest_key_create_project(
     principal: Principal,
     requested_project_id: str | None,
 ) -> str:
+    if requested_project_id is not None:
+        project = await get_project_for_principal(store, principal, requested_project_id)
+        return project.id
+
     scope = await resolve_read_scope(store, principal)
     if scope is None:
-        return requested_project_id or DEFAULT_PROJECT_ID
+        return DEFAULT_PROJECT_ID
     if not scope:
         raise HTTPException(status_code=404, detail="project not found")
-    if requested_project_id is not None:
-        if requested_project_id not in scope:
-            raise HTTPException(status_code=404, detail="project not found")
-        return requested_project_id
     if len(scope) == 1:
         return scope[0]
     raise HTTPException(status_code=400, detail="project_id is required")
@@ -223,10 +225,21 @@ def create_management_app(
         request: Request,
         limit: int = Query(default=100, ge=1, le=1000),
         offset: int = Query(default=0, ge=0),
+        project_id: str | None = Query(default=None),
     ) -> dict[str, object]:
         store: Storage = request.app.state.storage
-        items = await store.list_exchanges(limit=limit, offset=offset)
-        total = await store.count_exchanges()
+        project_ids = await resolve_list_project_ids_filter(
+            store,
+            request.state.principal,
+            project_id,
+            None,
+        )
+        items = await store.list_exchanges(
+            limit=limit,
+            offset=offset,
+            project_ids=project_ids,
+        )
+        total = await store.count_exchanges(project_ids=project_ids)
         return {
             "items": [_exchange_to_json(item) for item in items],
             "total": total,
@@ -276,11 +289,18 @@ def create_management_app(
         request: Request,
         limit: int = Query(default=50, ge=1, le=1000),
         offset: int = Query(default=0, ge=0),
+        project_id: str | None = Query(default=None),
     ) -> dict[str, object]:
         store: Storage = request.app.state.storage
         scope = await resolve_read_scope(store, request.state.principal)
-        items = await store.list_runs(limit=limit, offset=offset, project_ids=scope)
-        total = await store.count_runs(project_ids=scope)
+        project_ids = await resolve_list_project_ids_filter(
+            store,
+            request.state.principal,
+            project_id,
+            scope,
+        )
+        items = await store.list_runs(limit=limit, offset=offset, project_ids=project_ids)
+        total = await store.count_runs(project_ids=project_ids)
         return {
             "items": [_run_summary_to_json(item) for item in items],
             "total": total,
@@ -322,10 +342,19 @@ def create_management_app(
         return _regression_test_to_json(test)
 
     @app.get("/api/tests")
-    async def list_tests(request: Request) -> dict[str, object]:
+    async def list_tests(
+        request: Request,
+        project_id: str | None = Query(default=None),
+    ) -> dict[str, object]:
         store: Storage = request.app.state.storage
         scope = await resolve_read_scope(store, request.state.principal)
-        items = await store.list_tests(project_ids=scope)
+        project_ids = await resolve_list_project_ids_filter(
+            store,
+            request.state.principal,
+            project_id,
+            scope,
+        )
+        items = await store.list_tests(project_ids=project_ids)
         return {
             "items": [_regression_test_to_json(item) for item in items],
             "total": len(items),
@@ -432,11 +461,20 @@ def create_management_app(
         return payload
 
     @app.get("/api/ingest-keys")
-    async def list_ingest_keys(request: Request) -> dict[str, object]:
+    async def list_ingest_keys(
+        request: Request,
+        project_id: str | None = Query(default=None),
+    ) -> dict[str, object]:
         store: Storage = request.app.state.storage
-        project_ids = await resolve_ingest_key_list_project_ids(
+        default_project_ids = await resolve_ingest_key_list_project_ids(
             store,
             request.state.principal,
+        )
+        project_ids = await resolve_list_project_ids_filter(
+            store,
+            request.state.principal,
+            project_id,
+            default_project_ids,
         )
         items = await store.list_ingest_keys_for_projects(project_ids)
         return {
