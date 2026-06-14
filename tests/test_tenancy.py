@@ -166,16 +166,16 @@ async def test_exchange_defaults_to_default_project_and_scopes_reads(
     all_exchanges = await core_storage.list_exchanges()
     assert len(all_exchanges) == 2
 
-    default_only = await core_storage.list_exchanges(project_id=DEFAULT_PROJECT_ID)
+    default_only = await core_storage.list_exchanges(project_ids=[DEFAULT_PROJECT_ID])
     assert len(default_only) == 1
     assert default_only[0].id == default_exchange.id
 
-    other_only = await core_storage.list_exchanges(project_id=OTHER_PROJECT_ID)
+    other_only = await core_storage.list_exchanges(project_ids=[OTHER_PROJECT_ID])
     assert len(other_only) == 1
     assert other_only[0].id == other_exchange.id
 
     assert await core_storage.count_exchanges() == 2
-    assert await core_storage.count_exchanges(project_id=DEFAULT_PROJECT_ID) == 1
+    assert await core_storage.count_exchanges(project_ids=[DEFAULT_PROJECT_ID]) == 1
 
     await core_storage.save_exchange(
         _sample_exchange(
@@ -195,14 +195,14 @@ async def test_exchange_defaults_to_default_project_and_scopes_reads(
     all_runs = await core_storage.list_runs()
     assert len(all_runs) == 4
 
-    default_runs = await core_storage.list_runs(project_id=DEFAULT_PROJECT_ID)
+    default_runs = await core_storage.list_runs(project_ids=[DEFAULT_PROJECT_ID])
     assert {run.run_id for run in default_runs} == {
         "default-exchange-run",
         "default-run",
     }
 
-    other_runs = await core_storage.list_runs(project_id=OTHER_PROJECT_ID)
+    other_runs = await core_storage.list_runs(project_ids=[OTHER_PROJECT_ID])
     assert {run.run_id for run in other_runs} == {"other-exchange-run", "other-run"}
 
     assert await core_storage.count_runs() == 4
-    assert await core_storage.count_runs(project_id=OTHER_PROJECT_ID) == 2
+    assert await core_storage.count_runs(project_ids=[OTHER_PROJECT_ID]) == 2

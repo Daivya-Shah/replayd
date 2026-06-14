@@ -8,6 +8,7 @@ import json
 import secrets
 import sqlite3
 import uuid
+from collections.abc import Sequence
 from datetime import UTC, datetime
 
 from sqlalchemy import delete, func, inspect, select, text
@@ -68,6 +69,18 @@ def _is_sqlite_init_retryable(exc: BaseException) -> bool:
 
 def _is_sqlite_url(database_url: str) -> bool:
     return database_url.startswith("sqlite")
+
+
+def _apply_project_ids_filter(
+    stmt,
+    column,
+    project_ids: Sequence[str] | None,
+):
+    if project_ids is None:
+        return stmt
+    if len(project_ids) == 0:
+        return stmt.where(column.in_(()))
+    return stmt.where(column.in_(project_ids))
 
 
 def _configure_sqlite_connection(dbapi_connection: sqlite3.Connection) -> None:
@@ -216,7 +229,7 @@ class SqlStorage(Storage):
         limit: int = 100,
         offset: int = 0,
         *,
-        project_id: str | None = None,
+        project_ids: Sequence[str] | None = None,
     ) -> list[Exchange]:
         session_factory = self._require_session_factory()
         async with session_factory() as session:
@@ -224,17 +237,15 @@ class SqlStorage(Storage):
                 ExchangeRow.created_at.desc(),
                 ExchangeRow.id.desc(),
             )
-            if project_id is not None:
-                stmt = stmt.where(ExchangeRow.project_id == project_id)
+            stmt = _apply_project_ids_filter(stmt, ExchangeRow.project_id, project_ids)
             result = await session.execute(stmt.limit(limit).offset(offset))
             return [_row_to_exchange(row) for row in result.scalars().all()]
 
-    async def count_exchanges(self, *, project_id: str | None = None) -> int:
+    async def count_exchanges(self, *, project_ids: Sequence[str] | None = None) -> int:
         session_factory = self._require_session_factory()
         async with session_factory() as session:
             stmt = select(func.count()).select_from(ExchangeRow)
-            if project_id is not None:
-                stmt = stmt.where(ExchangeRow.project_id == project_id)
+            stmt = _apply_project_ids_filter(stmt, ExchangeRow.project_id, project_ids)
             result = await session.execute(stmt)
             return int(result.scalar_one())
 
@@ -243,7 +254,7 @@ class SqlStorage(Storage):
         limit: int = 50,
         offset: int = 0,
         *,
-        project_id: str | None = None,
+        project_ids: Sequence[str] | None = None,
     ) -> list[RunSummary]:
         session_factory = self._require_session_factory()
         async with session_factory() as session:
@@ -255,8 +266,11 @@ class SqlStorage(Storage):
                 func.sum(ExchangeRow.latency_ms).label("total_latency_ms"),
                 func.min(ExchangeRow.created_at).label("created_at"),
             ).group_by(ExchangeRow.run_id)
-            if project_id is not None:
-                grouped_stmt = grouped_stmt.where(ExchangeRow.project_id == project_id)
+            grouped_stmt = _apply_project_ids_filter(
+                grouped_stmt,
+                ExchangeRow.project_id,
+                project_ids,
+            )
             grouped = await session.execute(
                 grouped_stmt.order_by(
                     func.min(ExchangeRow.started_at).desc(),
@@ -277,10 +291,11 @@ class SqlStorage(Storage):
                     .distinct()
                     .order_by(ExchangeRow.model.asc())
                 )
-                if project_id is not None:
-                    models_stmt = models_stmt.where(
-                        ExchangeRow.project_id == project_id
-                    )
+                models_stmt = _apply_project_ids_filter(
+                    models_stmt,
+                    ExchangeRow.project_id,
+                    project_ids,
+                )
                 models_result = await session.execute(models_stmt)
                 models = [model_row[0] for model_row in models_result.all()]
                 status_stmt = (
@@ -293,10 +308,11 @@ class SqlStorage(Storage):
                     )
                     .limit(1)
                 )
-                if project_id is not None:
-                    status_stmt = status_stmt.where(
-                        ExchangeRow.project_id == project_id
-                    )
+                status_stmt = _apply_project_ids_filter(
+                    status_stmt,
+                    ExchangeRow.project_id,
+                    project_ids,
+                )
                 status_result = await session.execute(status_stmt)
                 status_row = status_result.first()
                 final_status = int(status_row[0]) if status_row is not None else 0
@@ -305,10 +321,11 @@ class SqlStorage(Storage):
                     .where(ExchangeRow.run_id == run_id)
                     .distinct()
                 )
-                if project_id is not None:
-                    parent_stmt = parent_stmt.where(
-                        ExchangeRow.project_id == project_id
-                    )
+                parent_stmt = _apply_project_ids_filter(
+                    parent_stmt,
+                    ExchangeRow.project_id,
+                    project_ids,
+                )
                 parent_result = await session.execute(parent_stmt)
                 parent_values = [parent_row[0] for parent_row in parent_result.all()]
                 parent_run_id = parent_values[0] if len(parent_values) == 1 else None
@@ -327,14 +344,13 @@ class SqlStorage(Storage):
                 )
             return summaries
 
-    async def count_runs(self, *, project_id: str | None = None) -> int:
+    async def count_runs(self, *, project_ids: Sequence[str] | None = None) -> int:
         session_factory = self._require_session_factory()
         async with session_factory() as session:
             stmt = select(func.count(func.distinct(ExchangeRow.run_id))).select_from(
                 ExchangeRow
             )
-            if project_id is not None:
-                stmt = stmt.where(ExchangeRow.project_id == project_id)
+            stmt = _apply_project_ids_filter(stmt, ExchangeRow.project_id, project_ids)
             result = await session.execute(stmt)
             return int(result.scalar_one())
 
@@ -369,7 +385,7 @@ class SqlStorage(Storage):
     async def list_tests(
         self,
         *,
-        project_id: str | None = None,
+        project_ids: Sequence[str] | None = None,
     ) -> list[RegressionTest]:
         session_factory = self._require_session_factory()
         async with session_factory() as session:
@@ -377,8 +393,11 @@ class SqlStorage(Storage):
                 RegressionTestRow.created_at.desc(),
                 RegressionTestRow.id.desc(),
             )
-            if project_id is not None:
-                stmt = stmt.where(RegressionTestRow.project_id == project_id)
+            stmt = _apply_project_ids_filter(
+                stmt,
+                RegressionTestRow.project_id,
+                project_ids,
+            )
             result = await session.execute(stmt)
             return [_row_to_regression_test(row) for row in result.scalars().all()]
 
@@ -548,7 +567,7 @@ class SqlStorage(Storage):
     async def create_ingest_key(
         self,
         project_id: str,
-        name: str,
+        name: str | None = None,
     ) -> tuple[ProjectIngestKey, str]:
         plaintext = _generate_ingest_token()
         key_hash = _hash_ingest_token(plaintext)
@@ -556,7 +575,7 @@ class SqlStorage(Storage):
         key = ProjectIngestKey(
             id=uuid.uuid4().hex,
             project_id=project_id,
-            name=name,
+            name=name or "",
             key_prefix=plaintext[:12],
             key_hash=key_hash,
             created_at=created_at,
@@ -568,22 +587,39 @@ class SqlStorage(Storage):
         return key, plaintext
 
     async def list_ingest_keys(self, project_id: str) -> list[ProjectIngestKey]:
+        return await self.list_ingest_keys_for_projects([project_id])
+
+    async def list_ingest_keys_for_projects(
+        self,
+        project_ids: Sequence[str] | None,
+    ) -> list[ProjectIngestKey]:
         session_factory = self._require_session_factory()
         async with session_factory() as session:
-            result = await session.execute(
-                select(ProjectIngestKeyRow)
-                .where(ProjectIngestKeyRow.project_id == project_id)
-                .order_by(
-                    ProjectIngestKeyRow.created_at.desc(),
-                    ProjectIngestKeyRow.id.desc(),
-                )
+            stmt = select(ProjectIngestKeyRow).order_by(
+                ProjectIngestKeyRow.created_at.desc(),
+                ProjectIngestKeyRow.id.desc(),
             )
+            if project_ids is not None:
+                if len(project_ids) == 0:
+                    return []
+                stmt = stmt.where(ProjectIngestKeyRow.project_id.in_(project_ids))
+            result = await session.execute(stmt)
             keys: list[ProjectIngestKey] = []
             for row in result.scalars().all():
                 model = _row_to_ingest_key(row)
                 model.key_hash = ""
                 keys.append(model)
             return keys
+
+    async def get_ingest_key(self, key_id: str) -> ProjectIngestKey | None:
+        session_factory = self._require_session_factory()
+        async with session_factory() as session:
+            row = await session.get(ProjectIngestKeyRow, key_id)
+            if row is None:
+                return None
+            model = _row_to_ingest_key(row)
+            model.key_hash = ""
+            return model
 
     async def resolve_ingest_key(self, plaintext: str) -> ProjectIngestKey | None:
         key_hash = _hash_ingest_token(plaintext)

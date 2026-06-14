@@ -18,11 +18,21 @@ from replayd.control_auth import (
     log_unprotected_api_warning,
     oidc_configured,
 )
-from replayd.auth.oidc import OidcVerifier, oidc_configured
+from replayd.auth.oidc import OidcVerifier
+from replayd.auth.principal import Principal
+from replayd.auth.scoping import (
+    exchange_in_read_scope,
+    project_id_in_read_scope,
+    regression_test_in_read_scope,
+    resolve_ingest_key_list_project_ids,
+    resolve_read_scope,
+    run_steps_in_read_scope,
+)
 from replayd.decoding import decode_body
-from replayd.models import Exchange, RegressionTest, RunSummary, TestResult
+from replayd.models import Exchange, ProjectIngestKey, RegressionTest, RunSummary, TestResult
 from replayd.storage.base import Storage
 from replayd.storage.factory import get_storage
+from replayd.tenancy import DEFAULT_PROJECT_ID
 from replayd.testing import run_regression_test
 
 logger = logging.getLogger(__name__)
@@ -36,6 +46,11 @@ class CreateRegressionTestBody(BaseModel):
 
 class RunRegressionTestBody(BaseModel):
     candidate_run_id: str | None = None
+
+
+class CreateIngestKeyBody(BaseModel):
+    name: str | None = None
+    project_id: str | None = None
 
 
 def _exchange_to_json(exchange: Exchange) -> dict[str, object]:
@@ -52,6 +67,35 @@ def _regression_test_to_json(test: RegressionTest) -> dict[str, object]:
 
 def _test_result_to_json(result: TestResult) -> dict[str, object]:
     return result.model_dump(mode="json")
+
+
+def _ingest_key_metadata_to_json(key: ProjectIngestKey) -> dict[str, object]:
+    payload = key.model_dump(
+        mode="json",
+        include={"id", "project_id", "name", "key_prefix", "created_at", "last_used_at"},
+    )
+    payload["prefix"] = payload.pop("key_prefix")
+    payload["revoked"] = key.revoked_at is not None
+    return payload
+
+
+async def _resolve_ingest_key_create_project(
+    store: Storage,
+    principal: Principal,
+    requested_project_id: str | None,
+) -> str:
+    scope = await resolve_read_scope(store, principal)
+    if scope is None:
+        return requested_project_id or DEFAULT_PROJECT_ID
+    if not scope:
+        raise HTTPException(status_code=404, detail="project not found")
+    if requested_project_id is not None:
+        if requested_project_id not in scope:
+            raise HTTPException(status_code=404, detail="project not found")
+        return requested_project_id
+    if len(scope) == 1:
+        return scope[0]
+    raise HTTPException(status_code=400, detail="project_id is required")
 
 
 def _run_parent_run_id(steps: list[Exchange]) -> str | None:
@@ -181,6 +225,9 @@ def create_management_app(
         exchange = await store.get_exchange(exchange_id)
         if exchange is None:
             raise HTTPException(status_code=404, detail="exchange not found")
+        scope = await resolve_read_scope(store, request.state.principal)
+        if not exchange_in_read_scope(exchange, scope):
+            raise HTTPException(status_code=404, detail="exchange not found")
         return _exchange_to_json(exchange)
 
     @app.get("/api/exchanges/{exchange_id}/request")
@@ -188,6 +235,9 @@ def create_management_app(
         store: Storage = request.app.state.storage
         exchange = await store.get_exchange(exchange_id)
         if exchange is None or exchange.request_body_hash is None:
+            raise HTTPException(status_code=404, detail="exchange request not found")
+        scope = await resolve_read_scope(store, request.state.principal)
+        if not exchange_in_read_scope(exchange, scope):
             raise HTTPException(status_code=404, detail="exchange request not found")
         raw = await store.get_blob(exchange.request_body_hash)
         decoded = decode_body(raw, exchange.request_headers)
@@ -198,6 +248,9 @@ def create_management_app(
         store: Storage = request.app.state.storage
         exchange = await store.get_exchange(exchange_id)
         if exchange is None or exchange.response_body_hash is None:
+            raise HTTPException(status_code=404, detail="exchange response not found")
+        scope = await resolve_read_scope(store, request.state.principal)
+        if not exchange_in_read_scope(exchange, scope):
             raise HTTPException(status_code=404, detail="exchange response not found")
         raw = await store.get_blob(exchange.response_body_hash)
         decoded = decode_body(raw, exchange.response_headers)
@@ -210,8 +263,9 @@ def create_management_app(
         offset: int = Query(default=0, ge=0),
     ) -> dict[str, object]:
         store: Storage = request.app.state.storage
-        items = await store.list_runs(limit=limit, offset=offset)
-        total = await store.count_runs()
+        scope = await resolve_read_scope(store, request.state.principal)
+        items = await store.list_runs(limit=limit, offset=offset, project_ids=scope)
+        total = await store.count_runs(project_ids=scope)
         return {
             "items": [_run_summary_to_json(item) for item in items],
             "total": total,
@@ -222,6 +276,9 @@ def create_management_app(
         store: Storage = request.app.state.storage
         steps = await store.get_run(run_id)
         if not steps:
+            raise HTTPException(status_code=404, detail="run not found")
+        scope = await resolve_read_scope(store, request.state.principal)
+        if not run_steps_in_read_scope(steps, scope):
             raise HTTPException(status_code=404, detail="run not found")
         return _run_detail_from_steps(run_id, steps)
 
@@ -248,7 +305,8 @@ def create_management_app(
     @app.get("/api/tests")
     async def list_tests(request: Request) -> dict[str, object]:
         store: Storage = request.app.state.storage
-        items = await store.list_tests()
+        scope = await resolve_read_scope(store, request.state.principal)
+        items = await store.list_tests(project_ids=scope)
         return {
             "items": [_regression_test_to_json(item) for item in items],
             "total": len(items),
@@ -264,6 +322,9 @@ def create_management_app(
         store: Storage = request.app.state.storage
         test = await store.get_test(test_id)
         if test is None:
+            raise HTTPException(status_code=404, detail="test not found")
+        scope = await resolve_read_scope(store, request.state.principal)
+        if not regression_test_in_read_scope(test, scope):
             raise HTTPException(status_code=404, detail="test not found")
         results = await store.list_test_results(test_id, limit=limit, offset=offset)
         payload = _regression_test_to_json(test)
@@ -290,6 +351,47 @@ def create_management_app(
         deleted = await store.delete_test(test_id)
         if not deleted:
             raise HTTPException(status_code=404, detail="test not found")
+        return Response(status_code=204)
+
+    @app.post("/api/ingest-keys", status_code=201)
+    async def create_ingest_key(
+        body: CreateIngestKeyBody,
+        request: Request,
+    ) -> dict[str, object]:
+        store: Storage = request.app.state.storage
+        project_id = await _resolve_ingest_key_create_project(
+            store,
+            request.state.principal,
+            body.project_id,
+        )
+        key_model, plaintext = await store.create_ingest_key(project_id, body.name)
+        payload = _ingest_key_metadata_to_json(key_model)
+        payload["token"] = plaintext
+        return payload
+
+    @app.get("/api/ingest-keys")
+    async def list_ingest_keys(request: Request) -> dict[str, object]:
+        store: Storage = request.app.state.storage
+        project_ids = await resolve_ingest_key_list_project_ids(
+            store,
+            request.state.principal,
+        )
+        items = await store.list_ingest_keys_for_projects(project_ids)
+        return {
+            "items": [_ingest_key_metadata_to_json(item) for item in items],
+            "total": len(items),
+        }
+
+    @app.delete("/api/ingest-keys/{key_id}", status_code=204)
+    async def revoke_ingest_key_endpoint(key_id: str, request: Request) -> Response:
+        store: Storage = request.app.state.storage
+        key = await store.get_ingest_key(key_id)
+        if key is None:
+            raise HTTPException(status_code=404, detail="ingest key not found")
+        scope = await resolve_read_scope(store, request.state.principal)
+        if not project_id_in_read_scope(key.project_id, scope):
+            raise HTTPException(status_code=404, detail="ingest key not found")
+        await store.revoke_ingest_key(key_id)
         return Response(status_code=204)
 
     return app

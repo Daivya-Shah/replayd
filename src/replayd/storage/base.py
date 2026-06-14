@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 
 
 
@@ -90,7 +91,7 @@ class Storage(ABC):
 
         *,
 
-        project_id: str | None = None,
+        project_ids: Sequence[str] | None = None,
 
     ) -> list[Exchange]:
 
@@ -100,7 +101,7 @@ class Storage(ABC):
 
     @abstractmethod
 
-    async def count_exchanges(self, *, project_id: str | None = None) -> int:
+    async def count_exchanges(self, *, project_ids: Sequence[str] | None = None) -> int:
 
         """Return the total number of stored exchanges."""
 
@@ -118,7 +119,7 @@ class Storage(ABC):
 
         *,
 
-        project_id: str | None = None,
+        project_ids: Sequence[str] | None = None,
 
     ) -> list[RunSummary]:
 
@@ -128,7 +129,7 @@ class Storage(ABC):
 
     @abstractmethod
 
-    async def count_runs(self, *, project_id: str | None = None) -> int:
+    async def count_runs(self, *, project_ids: Sequence[str] | None = None) -> int:
 
         """Return the number of distinct runs."""
 
@@ -166,7 +167,7 @@ class Storage(ABC):
 
         *,
 
-        project_id: str | None = None,
+        project_ids: Sequence[str] | None = None,
 
     ) -> list[RegressionTest]:
 
@@ -336,7 +337,7 @@ class Storage(ABC):
 
         project_id: str,
 
-        name: str,
+        name: str | None = None,
 
     ) -> tuple[ProjectIngestKey, str]:
 
@@ -349,6 +350,28 @@ class Storage(ABC):
     async def list_ingest_keys(self, project_id: str) -> list[ProjectIngestKey]:
 
         """Return ingest keys for a project (prefix metadata only, no plaintext)."""
+
+
+
+    @abstractmethod
+
+    async def list_ingest_keys_for_projects(
+
+        self,
+
+        project_ids: Sequence[str] | None,
+
+    ) -> list[ProjectIngestKey]:
+
+        """Return ingest keys filtered by project IDs, or all when project_ids is None."""
+
+
+
+    @abstractmethod
+
+    async def get_ingest_key(self, key_id: str) -> ProjectIngestKey | None:
+
+        """Return ingest key metadata by id (no plaintext; hash stripped)."""
 
 
 

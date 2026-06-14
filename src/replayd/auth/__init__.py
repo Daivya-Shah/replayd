@@ -11,6 +11,7 @@ from replayd.auth.tenancy import (
     ensure_user_tenant,
     resolve_accessible_project_ids,
 )
+from replayd.auth.scoping import resolve_read_scope
 
 __all__ = [
     "AuthenticationError",
@@ -21,5 +22,6 @@ __all__ = [
     "get_principal",
     "oidc_configured",
     "resolve_accessible_project_ids",
+    "resolve_read_scope",
     "resolve_principal",
 ]
