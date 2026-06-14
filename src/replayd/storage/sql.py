@@ -555,6 +555,26 @@ class SqlStorage(Storage):
             session.add(_user_to_row(user))
             await session.commit()
 
+    async def update_user_profile(
+        self,
+        user_id: str,
+        *,
+        email: str | None = None,
+        name: str | None = None,
+    ) -> User | None:
+        session_factory = self._require_session_factory()
+        async with session_factory() as session:
+            row = await session.get(UserRow, user_id)
+            if row is None:
+                return None
+            if email is not None:
+                row.email = email
+            if name is not None:
+                row.name = name
+            await session.commit()
+            await session.refresh(row)
+            return _row_to_user(row)
+
     async def get_user(self, user_id: str) -> User | None:
         session_factory = self._require_session_factory()
         async with session_factory() as session:

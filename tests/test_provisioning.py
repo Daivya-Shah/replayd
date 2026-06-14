@@ -154,3 +154,83 @@ async def test_resolve_accessible_project_ids_for_non_user_principals(
         )
         == []
     )
+
+
+@pytest.mark.asyncio
+async def test_new_user_with_verified_email_persists_real_address(
+    core_storage: Storage,
+) -> None:
+    subject = f"provision-email-{uuid.uuid4().hex[:8]}"
+    email = f"real-{uuid.uuid4().hex[:6]}@example.com"
+
+    principal = await provision_user_principal(
+        core_storage,
+        subject=subject,
+        email=email,
+        name="Real Email User",
+        email_verified=True,
+    )
+
+    assert principal.user_id is not None
+    assert principal.email_verified is True
+
+    stored = await core_storage.get_user_by_subject(subject)
+    assert stored is not None
+    assert stored.email == email
+    assert stored.email.endswith("@unknown.local") is False
+
+
+@pytest.mark.asyncio
+async def test_existing_placeholder_user_is_healed_on_login(
+    core_storage: Storage,
+) -> None:
+    subject = f"heal-user-{uuid.uuid4().hex[:8]}"
+    user_id = uuid.uuid4().hex
+    await core_storage.create_user(
+        User(
+            id=user_id,
+            email=f"{subject}@unknown.local",
+            subject=subject,
+            name=None,
+            created_at=_now(),
+        )
+    )
+
+    healed_email = f"healed-{uuid.uuid4().hex[:6]}@example.com"
+    principal = await provision_user_principal(
+        core_storage,
+        subject=subject,
+        email=healed_email,
+        name="Healed User",
+        email_verified=True,
+    )
+
+    assert principal.user_id == user_id
+    assert principal.email_verified is True
+
+    stored = await core_storage.get_user_by_subject(subject)
+    assert stored is not None
+    assert stored.email == healed_email
+    assert stored.name == "Healed User"
+
+
+@pytest.mark.asyncio
+async def test_login_without_email_uses_placeholder_and_unverified(
+    core_storage: Storage,
+) -> None:
+    subject = f"no-email-{uuid.uuid4().hex[:8]}"
+
+    principal = await provision_user_principal(
+        core_storage,
+        subject=subject,
+        email=None,
+        name=None,
+        email_verified=False,
+    )
+
+    assert principal.user_id is not None
+    assert principal.email_verified is False
+
+    stored = await core_storage.get_user_by_subject(subject)
+    assert stored is not None
+    assert stored.email == f"{subject}@unknown.local"

@@ -63,7 +63,11 @@ class OidcClaims(dict):
 
     @property
     def email(self) -> str | None:
-        return self.get("email")
+        value = self.get("email")
+        if value is None:
+            return None
+        stripped = str(value).strip()
+        return stripped if stripped else None
 
     @property
     def name(self) -> str | None:

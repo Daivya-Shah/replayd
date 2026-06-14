@@ -327,6 +327,26 @@ class Storage(ABC):
 
     @abstractmethod
 
+    async def update_user_profile(
+
+        self,
+
+        user_id: str,
+
+        *,
+
+        email: str | None = None,
+
+        name: str | None = None,
+
+    ) -> User | None:
+
+        """Update stored user profile fields. Returns None when missing."""
+
+
+
+    @abstractmethod
+
     async def get_user(self, user_id: str) -> User | None:
 
         """Load a user by id."""

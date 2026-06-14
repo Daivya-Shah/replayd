@@ -24,6 +24,12 @@ from replayd.auth.tokens import (
     extract_bearer_token,
     tokens_match,
 )
+from replayd.auth.user_profile import (
+    login_email_for_invites,
+    normalized_token_email,
+    resolved_new_user_email,
+    sync_user_profile_from_token,
+)
 from replayd.config import Settings
 from replayd.models import User
 from replayd.auth.tenancy import accept_pending_invitations_for_user, ensure_user_tenant
@@ -113,24 +119,35 @@ async def provision_user_principal(
 ) -> Principal:
     existing = await storage.get_user_by_subject(subject)
     if existing is not None:
-        await accept_pending_invitations_for_user(
+        user = await sync_user_profile_from_token(
             storage,
             existing,
+            email=email,
+            name=name,
             email_verified=email_verified,
-            login_email=email,
         )
-        await ensure_user_tenant(storage, existing)
+        await accept_pending_invitations_for_user(
+            storage,
+            user,
+            email_verified=email_verified,
+            login_email=login_email_for_invites(
+                token_email=email,
+                user_email=user.email,
+            ),
+        )
+        await ensure_user_tenant(storage, user)
         return Principal(
             kind="user",
-            user_id=existing.id,
-            email_verified=email_verified,
+            user_id=user.id,
+            email_verified=email_verified if normalized_token_email(email) else False,
         )
 
+    trimmed_name = name.strip() if name and name.strip() else None
     user = User(
         id=uuid.uuid4().hex,
-        email=email or f"{subject}@unknown.local",
+        email=resolved_new_user_email(subject, email),
         subject=subject,
-        name=name,
+        name=trimmed_name,
         created_at=datetime.now(UTC),
     )
     await storage.create_user(user)
@@ -138,13 +155,16 @@ async def provision_user_principal(
         storage,
         user,
         email_verified=email_verified,
-        login_email=email,
+        login_email=login_email_for_invites(
+            token_email=email,
+            user_email=user.email,
+        ),
     )
     await ensure_user_tenant(storage, user)
     return Principal(
         kind="user",
         user_id=user.id,
-        email_verified=email_verified,
+        email_verified=email_verified if normalized_token_email(email) else False,
     )
 
 

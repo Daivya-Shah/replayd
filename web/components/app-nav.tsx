@@ -13,6 +13,7 @@ const links = [
   { href: "/tests", label: "Tests" },
   { href: "/keys", label: "Keys" },
   { href: "/team", label: "Team" },
+  { href: "/profile", label: "Account" },
 ];
 
 function isActive(pathname: string, href: string): boolean {
@@ -63,9 +64,12 @@ export function AppNav() {
           {oidcEnabled && session && (
             <div className="flex items-center gap-4">
               {session.user?.email && (
-                <span className="hidden text-sm text-zinc-600 dark:text-zinc-400 sm:inline">
+                <Link
+                  href="/profile"
+                  className="hidden text-sm text-zinc-600 transition hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white sm:inline"
+                >
                   {session.user.email}
-                </span>
+                </Link>
               )}
               <button
                 type="button"
