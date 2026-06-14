@@ -7,13 +7,19 @@ from replayd.auth.principal import (
     get_principal,
     resolve_principal,
 )
+from replayd.auth.tenancy import (
+    ensure_user_tenant,
+    resolve_accessible_project_ids,
+)
 
 __all__ = [
     "AuthenticationError",
     "OidcAuthError",
     "OidcVerifier",
     "Principal",
+    "ensure_user_tenant",
     "get_principal",
     "oidc_configured",
+    "resolve_accessible_project_ids",
     "resolve_principal",
 ]

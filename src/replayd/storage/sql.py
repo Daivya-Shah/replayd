@@ -524,6 +524,27 @@ class SqlStorage(Storage):
             )
             return [_row_to_membership(row) for row in result.scalars().all()]
 
+    async def list_memberships_for_user(self, user_id: str) -> list[Membership]:
+        session_factory = self._require_session_factory()
+        async with session_factory() as session:
+            result = await session.execute(
+                select(MembershipRow)
+                .where(MembershipRow.user_id == user_id)
+                .order_by(MembershipRow.created_at.desc(), MembershipRow.id.desc())
+            )
+            return [_row_to_membership(row) for row in result.scalars().all()]
+
+    async def list_accessible_project_ids(self, user_id: str) -> list[str]:
+        session_factory = self._require_session_factory()
+        async with session_factory() as session:
+            result = await session.execute(
+                select(ProjectRow.id)
+                .join(MembershipRow, MembershipRow.org_id == ProjectRow.org_id)
+                .where(MembershipRow.user_id == user_id)
+                .order_by(ProjectRow.created_at.desc(), ProjectRow.id.desc())
+            )
+            return list(result.scalars().all())
+
     async def create_ingest_key(
         self,
         project_id: str,

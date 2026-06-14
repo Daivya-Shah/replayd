@@ -26,6 +26,7 @@ from replayd.auth.tokens import (
 )
 from replayd.config import Settings
 from replayd.models import User
+from replayd.auth.tenancy import ensure_user_tenant
 from replayd.storage.base import Storage
 
 logger = logging.getLogger(__name__)
@@ -110,6 +111,7 @@ async def provision_user_principal(
 ) -> Principal:
     existing = await storage.get_user_by_subject(subject)
     if existing is not None:
+        await ensure_user_tenant(storage, existing)
         return Principal(kind="user", user_id=existing.id)
 
     user = User(
@@ -120,6 +122,7 @@ async def provision_user_principal(
         created_at=datetime.now(UTC),
     )
     await storage.create_user(user)
+    await ensure_user_tenant(storage, user)
     return Principal(kind="user", user_id=user.id)
 
 

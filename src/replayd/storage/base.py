@@ -314,6 +314,22 @@ class Storage(ABC):
 
     @abstractmethod
 
+    async def list_memberships_for_user(self, user_id: str) -> list[Membership]:
+
+        """Return all organization memberships for a user."""
+
+
+
+    @abstractmethod
+
+    async def list_accessible_project_ids(self, user_id: str) -> list[str]:
+
+        """Return project IDs reachable via the user's org memberships."""
+
+
+
+    @abstractmethod
+
     async def create_ingest_key(
 
         self,
