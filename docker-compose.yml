@@ -163,6 +163,7 @@ services:
       args:
         NEXT_PUBLIC_REPLAYD_API_URL: http://localhost:8788
         NEXT_PUBLIC_OIDC_ENABLED: "true"
+        NEXT_PUBLIC_PROXY_URL: http://localhost:8787
     ports:
       - "3000:3000"
     environment:

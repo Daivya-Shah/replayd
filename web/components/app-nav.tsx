@@ -9,6 +9,7 @@ import { isOidcEnabled } from "@/lib/oidc";
 const links = [
   { href: "/", label: "Runs" },
   { href: "/tests", label: "Tests" },
+  { href: "/keys", label: "Keys" },
 ];
 
 function isActive(pathname: string, href: string): boolean {
