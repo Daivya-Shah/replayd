@@ -20,6 +20,14 @@ from replayd.control_auth import (
 )
 from replayd.auth.oidc import OidcVerifier
 from replayd.auth.principal import Principal
+from replayd.auth.invitations import (
+    create_invitation_for_principal,
+    invitation_to_json,
+    list_invitations_for_principal,
+    list_members_for_principal,
+    org_member_to_json,
+    revoke_invitation_for_principal,
+)
 from replayd.auth.projects import (
     create_project_for_principal,
     get_project_for_principal,
@@ -68,6 +76,11 @@ class CreateProjectBody(BaseModel):
 
 class RenameProjectBody(BaseModel):
     name: str
+
+
+class CreateInvitationBody(BaseModel):
+    email: str
+    role: str | None = None
 
 
 def _exchange_to_json(exchange: Exchange) -> dict[str, object]:
@@ -444,6 +457,51 @@ def create_management_app(
             name=name,
         )
         return project_to_json(project)
+
+    @app.post("/api/invitations", status_code=201)
+    async def create_invitation(
+        body: CreateInvitationBody,
+        request: Request,
+    ) -> dict[str, object]:
+        store: Storage = request.app.state.storage
+        invitation = await create_invitation_for_principal(
+            store,
+            request.state.principal,
+            email=body.email,
+            role=body.role,
+        )
+        return invitation_to_json(invitation)
+
+    @app.get("/api/invitations")
+    async def list_invitations(request: Request) -> dict[str, object]:
+        store: Storage = request.app.state.storage
+        items = await list_invitations_for_principal(store, request.state.principal)
+        return {
+            "items": [invitation_to_json(item) for item in items],
+            "total": len(items),
+        }
+
+    @app.delete("/api/invitations/{invitation_id}", status_code=204)
+    async def revoke_invitation_endpoint(
+        invitation_id: str,
+        request: Request,
+    ) -> Response:
+        store: Storage = request.app.state.storage
+        await revoke_invitation_for_principal(
+            store,
+            request.state.principal,
+            invitation_id,
+        )
+        return Response(status_code=204)
+
+    @app.get("/api/members")
+    async def list_members(request: Request) -> dict[str, object]:
+        store: Storage = request.app.state.storage
+        items = await list_members_for_principal(store, request.state.principal)
+        return {
+            "items": [org_member_to_json(item) for item in items],
+            "total": len(items),
+        }
 
     @app.post("/api/ingest-keys", status_code=201)
     async def create_ingest_key(

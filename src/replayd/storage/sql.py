@@ -9,7 +9,7 @@ import secrets
 import sqlite3
 import uuid
 from collections.abc import Sequence
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import delete, func, inspect, select, text
 from sqlalchemy.engine import Engine
@@ -22,8 +22,10 @@ from sqlalchemy.ext.asyncio import (
 
 from replayd.models import (
     Exchange,
+    Invitation,
     Membership,
     Organization,
+    OrgMember,
     Project,
     ProjectIngestKey,
     RegressionTest,
@@ -38,6 +40,7 @@ from replayd.storage.blobs import FilesystemBlobStore
 from replayd.migrations.runner import ensure_schema
 from replayd.storage.schema import (
     ExchangeRow,
+    InvitationRow,
     MembershipRow,
     OrganizationRow,
     ProjectIngestKeyRow,
@@ -614,6 +617,177 @@ class SqlStorage(Storage):
             )
             return [_row_to_membership(row) for row in result.scalars().all()]
 
+    async def get_membership_for_org_user(
+        self,
+        org_id: str,
+        user_id: str,
+    ) -> Membership | None:
+        session_factory = self._require_session_factory()
+        async with session_factory() as session:
+            result = await session.execute(
+                select(MembershipRow).where(
+                    MembershipRow.org_id == org_id,
+                    MembershipRow.user_id == user_id,
+                )
+            )
+            row = result.scalar_one_or_none()
+            if row is None:
+                return None
+            return _row_to_membership(row)
+
+    async def list_memberships_for_org(self, org_id: str) -> list[OrgMember]:
+        session_factory = self._require_session_factory()
+        async with session_factory() as session:
+            result = await session.execute(
+                select(MembershipRow, UserRow)
+                .join(UserRow, UserRow.id == MembershipRow.user_id)
+                .where(MembershipRow.org_id == org_id)
+                .order_by(MembershipRow.created_at.asc(), MembershipRow.id.asc())
+            )
+            members: list[OrgMember] = []
+            for membership_row, user_row in result.all():
+                members.append(
+                    OrgMember(
+                        user_id=user_row.id,
+                        email=user_row.email,
+                        role=membership_row.role,
+                        joined_at=datetime.fromisoformat(membership_row.created_at),
+                    )
+                )
+            return members
+
+    async def create_invitation(
+        self,
+        *,
+        org_id: str,
+        email: str,
+        role: str,
+        invited_by_user_id: str,
+    ) -> Invitation:
+        now = datetime.now(UTC)
+        invitation = Invitation(
+            id=uuid.uuid4().hex,
+            org_id=org_id,
+            email=email,
+            role=role,
+            token=secrets.token_urlsafe(32),
+            status="pending",
+            invited_by_user_id=invited_by_user_id,
+            created_at=now,
+            accepted_at=None,
+            expires_at=now + timedelta(days=14),
+        )
+        session_factory = self._require_session_factory()
+        async with session_factory() as session:
+            session.add(_invitation_to_row(invitation))
+            await session.commit()
+        return invitation
+
+    async def list_invitations(
+        self,
+        org_id: str,
+        *,
+        status: str = "pending",
+    ) -> list[Invitation]:
+        session_factory = self._require_session_factory()
+        async with session_factory() as session:
+            result = await session.execute(
+                select(InvitationRow)
+                .where(
+                    InvitationRow.org_id == org_id,
+                    InvitationRow.status == status,
+                )
+                .order_by(InvitationRow.created_at.desc(), InvitationRow.id.desc())
+            )
+            return [_row_to_invitation(row) for row in result.scalars().all()]
+
+    async def get_invitation(self, invitation_id: str) -> Invitation | None:
+        session_factory = self._require_session_factory()
+        async with session_factory() as session:
+            row = await session.get(InvitationRow, invitation_id)
+            if row is None:
+                return None
+            return _row_to_invitation(row)
+
+    async def has_pending_invitation_for_org_email(
+        self,
+        org_id: str,
+        email: str,
+    ) -> bool:
+        session_factory = self._require_session_factory()
+        now = datetime.now(UTC).isoformat()
+        async with session_factory() as session:
+            result = await session.execute(
+                select(func.count())
+                .select_from(InvitationRow)
+                .where(
+                    InvitationRow.org_id == org_id,
+                    InvitationRow.email == email,
+                    InvitationRow.status == "pending",
+                    InvitationRow.expires_at > now,
+                )
+            )
+            return int(result.scalar_one()) > 0
+
+    async def list_pending_invitations_for_email(self, email: str) -> list[Invitation]:
+        session_factory = self._require_session_factory()
+        now = datetime.now(UTC).isoformat()
+        async with session_factory() as session:
+            result = await session.execute(
+                select(InvitationRow)
+                .where(
+                    InvitationRow.email == email,
+                    InvitationRow.status == "pending",
+                    InvitationRow.expires_at > now,
+                )
+                .order_by(InvitationRow.created_at.asc(), InvitationRow.id.asc())
+            )
+            return [_row_to_invitation(row) for row in result.scalars().all()]
+
+    async def revoke_invitation(self, invitation_id: str) -> bool:
+        session_factory = self._require_session_factory()
+        async with session_factory() as session:
+            row = await session.get(InvitationRow, invitation_id)
+            if row is None or row.status != "pending":
+                return False
+            row.status = "revoked"
+            await session.commit()
+            return True
+
+    async def accept_invitation(self, invitation: Invitation, user_id: str) -> None:
+        if invitation.status != "pending":
+            return
+        now = datetime.now(UTC)
+        if invitation.expires_at <= now:
+            return
+
+        session_factory = self._require_session_factory()
+        async with session_factory() as session:
+            existing = await session.execute(
+                select(MembershipRow).where(
+                    MembershipRow.org_id == invitation.org_id,
+                    MembershipRow.user_id == user_id,
+                )
+            )
+            membership_row = existing.scalar_one_or_none()
+            if membership_row is None:
+                session.add(
+                    MembershipRow(
+                        id=uuid.uuid4().hex,
+                        org_id=invitation.org_id,
+                        user_id=user_id,
+                        role=invitation.role,
+                        created_at=now.isoformat(),
+                    )
+                )
+
+            invite_row = await session.get(InvitationRow, invitation.id)
+            if invite_row is not None and invite_row.status == "pending":
+                invite_row.status = "accepted"
+                invite_row.accepted_at = now.isoformat()
+
+            await session.commit()
+
     async def list_accessible_project_ids(self, user_id: str) -> list[str]:
         session_factory = self._require_session_factory()
         async with session_factory() as session:
@@ -909,6 +1083,38 @@ def _row_to_membership(row: MembershipRow) -> Membership:
         user_id=row.user_id,
         role=row.role,
         created_at=datetime.fromisoformat(row.created_at),
+    )
+
+
+def _invitation_to_row(invitation: Invitation) -> InvitationRow:
+    return InvitationRow(
+        id=invitation.id,
+        org_id=invitation.org_id,
+        email=invitation.email,
+        role=invitation.role,
+        token=invitation.token,
+        status=invitation.status,
+        invited_by_user_id=invitation.invited_by_user_id,
+        created_at=invitation.created_at.isoformat(),
+        accepted_at=invitation.accepted_at.isoformat() if invitation.accepted_at else None,
+        expires_at=invitation.expires_at.isoformat(),
+    )
+
+
+def _row_to_invitation(row: InvitationRow) -> Invitation:
+    return Invitation(
+        id=row.id,
+        org_id=row.org_id,
+        email=row.email,
+        role=row.role,
+        token=row.token,
+        status=row.status,
+        invited_by_user_id=row.invited_by_user_id,
+        created_at=datetime.fromisoformat(row.created_at),
+        accepted_at=(
+            datetime.fromisoformat(row.accepted_at) if row.accepted_at else None
+        ),
+        expires_at=datetime.fromisoformat(row.expires_at),
     )
 
 

@@ -383,7 +383,7 @@ async def test_init_stamps_pre_alembic_database_with_core_tables(
         assert storage._engine is not None
         async with storage._engine.connect() as conn:
             version = await conn.scalar(text("SELECT version_num FROM alembic_version"))
-        assert version == "0002"
+        assert version == "0003"
 
         exchange = await storage.get_exchange(exchange_id)
         assert exchange is not None

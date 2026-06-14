@@ -34,6 +34,26 @@ class Membership(BaseModel):
     created_at: datetime
 
 
+class Invitation(BaseModel):
+    id: str = Field(description="UUID identifier")
+    org_id: str
+    email: str
+    role: str = Field(default="member", pattern="^(owner|admin|member|viewer)$")
+    token: str
+    status: str = Field(pattern="^(pending|accepted|revoked)$")
+    invited_by_user_id: str
+    created_at: datetime
+    accepted_at: datetime | None = None
+    expires_at: datetime
+
+
+class OrgMember(BaseModel):
+    user_id: str
+    email: str
+    role: str
+    joined_at: datetime
+
+
 class ProjectIngestKey(BaseModel):
     id: str = Field(description="UUID identifier")
     project_id: str

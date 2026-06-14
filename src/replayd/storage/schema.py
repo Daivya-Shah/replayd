@@ -71,6 +71,30 @@ class MembershipRow(Base):
     created_at: Mapped[str] = mapped_column(String, nullable=False)
 
 
+class InvitationRow(Base):
+    __tablename__ = "invitations"
+    __table_args__ = (Index("idx_invitations_email_status", "email", "status"),)
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    org_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("organizations.id"),
+        nullable=False,
+    )
+    email: Mapped[str] = mapped_column(String, nullable=False)
+    role: Mapped[str] = mapped_column(String, nullable=False)
+    token: Mapped[str] = mapped_column(String, nullable=False)
+    status: Mapped[str] = mapped_column(String, nullable=False)
+    invited_by_user_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("users.id"),
+        nullable=False,
+    )
+    created_at: Mapped[str] = mapped_column(String, nullable=False)
+    accepted_at: Mapped[str | None] = mapped_column(String, nullable=True)
+    expires_at: Mapped[str] = mapped_column(String, nullable=False)
+
+
 class ProjectIngestKeyRow(Base):
     __tablename__ = "project_ingest_keys"
     __table_args__ = (

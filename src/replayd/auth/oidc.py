@@ -69,6 +69,15 @@ class OidcClaims(dict):
     def name(self) -> str | None:
         return self.get("name")
 
+    @property
+    def email_verified(self) -> bool:
+        value = self.get("email_verified")
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            return value.lower() in {"true", "1", "yes"}
+        return False
+
 
 class OidcVerifier:
     """Validates OIDC bearer tokens (ES384/RS256) against issuer JWKS."""
@@ -119,4 +128,5 @@ class OidcVerifier:
             sub=str(claims["sub"]),
             email=claims.get("email"),
             name=claims.get("name"),
+            email_verified=claims.get("email_verified"),
         )

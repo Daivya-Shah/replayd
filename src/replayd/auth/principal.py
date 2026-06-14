@@ -26,7 +26,7 @@ from replayd.auth.tokens import (
 )
 from replayd.config import Settings
 from replayd.models import User
-from replayd.auth.tenancy import ensure_user_tenant
+from replayd.auth.tenancy import accept_pending_invitations_for_user, ensure_user_tenant
 from replayd.storage.base import Storage
 
 logger = logging.getLogger(__name__)
@@ -108,9 +108,16 @@ async def provision_user_principal(
     subject: str,
     email: str | None,
     name: str | None,
+    email_verified: bool = False,
 ) -> Principal:
     existing = await storage.get_user_by_subject(subject)
     if existing is not None:
+        await accept_pending_invitations_for_user(
+            storage,
+            existing,
+            email_verified=email_verified,
+            login_email=email,
+        )
         await ensure_user_tenant(storage, existing)
         return Principal(kind="user", user_id=existing.id)
 
@@ -122,6 +129,12 @@ async def provision_user_principal(
         created_at=datetime.now(UTC),
     )
     await storage.create_user(user)
+    await accept_pending_invitations_for_user(
+        storage,
+        user,
+        email_verified=email_verified,
+        login_email=email,
+    )
     await ensure_user_tenant(storage, user)
     return Principal(kind="user", user_id=user.id)
 
@@ -145,6 +158,7 @@ async def resolve_principal(
                 subject=claims.sub,
                 email=claims.email,
                 name=claims.name,
+                email_verified=claims.email_verified,
             )
         except OidcAuthError as exc:
             oidc_verification_error = exc

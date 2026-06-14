@@ -7,9 +7,13 @@ from replayd.models import (
 
     Exchange,
 
+    Invitation,
+
     Membership,
 
     Organization,
+
+    OrgMember,
 
     Project,
 
@@ -374,6 +378,118 @@ class Storage(ABC):
     async def list_memberships_for_user(self, user_id: str) -> list[Membership]:
 
         """Return all organization memberships for a user."""
+
+
+
+    @abstractmethod
+
+    async def get_membership_for_org_user(
+
+        self,
+
+        org_id: str,
+
+        user_id: str,
+
+    ) -> Membership | None:
+
+        """Return a membership for an org/user pair, or None if missing."""
+
+
+
+    @abstractmethod
+
+    async def list_memberships_for_org(self, org_id: str) -> list[OrgMember]:
+
+        """Return org members with user email and join time."""
+
+
+
+    @abstractmethod
+
+    async def create_invitation(
+
+        self,
+
+        *,
+
+        org_id: str,
+
+        email: str,
+
+        role: str,
+
+        invited_by_user_id: str,
+
+    ) -> Invitation:
+
+        """Create a pending invitation with generated id and token."""
+
+
+
+    @abstractmethod
+
+    async def list_invitations(
+
+        self,
+
+        org_id: str,
+
+        *,
+
+        status: str = "pending",
+
+    ) -> list[Invitation]:
+
+        """Return invitations for an organization filtered by status."""
+
+
+
+    @abstractmethod
+
+    async def get_invitation(self, invitation_id: str) -> Invitation | None:
+
+        """Load an invitation by id."""
+
+
+
+    @abstractmethod
+
+    async def has_pending_invitation_for_org_email(
+
+        self,
+
+        org_id: str,
+
+        email: str,
+
+    ) -> bool:
+
+        """Return True when a pending invite exists for the org/email pair."""
+
+
+
+    @abstractmethod
+
+    async def list_pending_invitations_for_email(self, email: str) -> list[Invitation]:
+
+        """Return pending, unexpired invitations for an email address."""
+
+
+
+    @abstractmethod
+
+    async def revoke_invitation(self, invitation_id: str) -> bool:
+
+        """Revoke a pending invitation. Returns True if updated."""
+
+
+
+    @abstractmethod
+
+    async def accept_invitation(self, invitation: Invitation, user_id: str) -> None:
+
+        """Accept an invitation, creating membership idempotently."""
 
 
 

@@ -52,6 +52,7 @@ def _mint_jwt(
     sub: str,
     email: str | None = "user@example.com",
     name: str | None = "Test User",
+    email_verified: bool | None = True,
     issuer: str = TEST_ISSUER,
     audience: str = TEST_AUDIENCE,
     exp_seconds: int = 3600,
@@ -70,6 +71,8 @@ def _mint_jwt(
         payload["email"] = email
     if name is not None:
         payload["name"] = name
+    if email_verified is not None:
+        payload["email_verified"] = email_verified
     return jwt.encode(
         payload,
         private_key,
