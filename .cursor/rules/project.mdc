@@ -1,0 +1,74 @@
+---
+description: Core architecture and standards for replayd
+alwaysApply: true
+---
+
+STANDING RULE: Whenever a dependency is added or changed in `pyproject.toml`, run `pip install -e .` in your local `.venv` before testing. Cursor's environment differs from the developer's venv.
+
+PROJECT: "replayd" — a deterministic record-and-replay reliability layer for LLM agents, built for production deployment and meant to scale to a large company.
+
+WHAT IT IS: A transparent reverse proxy that sits between an AI agent and an OpenAI/Anthropic-compatible LLM API. It captures every step of an agent's run and lets users replay it. This is the foundation for later step-through debugging and drift-detection features.
+
+STACK:
+- Backend: Python 3.12, FastAPI, uvicorn, async httpx, Pydantic v2, pydantic-settings.
+- Storage: SQLAlchemy 2.0 async for the relational index (exchanges, regression_tests, test_results, plus multi-tenant org/project/user tables), one implementation for SQLite and Postgres, selected by DATABASE_URL (default `sqlite+aiosqlite:///{STORAGE_DIR}/replayd.db`). Content-addressed request/response bodies use a swappable BlobStore: FilesystemBlobStore (default; `{STORAGE_DIR}/blobs/`, local/self-host) and S3BlobStore (AWS S3 or MinIO; production default in Docker Compose). Keys are sha256 digests with identical layout `blobs/{digest[:2]}/{digest}` across backends; selected by `BLOB_STORAGE_BACKEND`. Alembic owns the relational schema: SQLAlchemy models in `storage/schema.py` are the source of truth; migrations live in `src/replayd/migrations` and must work on both SQLite (batch mode) and Postgres. Do not use `create_all` or hand-rolled ALTER TABLE for schema changes. `RUN_MIGRATIONS_ON_STARTUP` controls auto-migration on init; production may run `python -m replayd.migrate` as a one-shot step instead. Keep a storage interface so call sites do not depend on the backend.
+- Tests: pytest + pytest-asyncio.
+
+MULTI-TENANCY:
+- Hierarchy: Organization → Project. Runs/exchanges and regression tests belong to a Project; a Project belongs to an Organization.
+- Users join an Organization via Membership (role: owner, admin, member, viewer).
+- Each Project may have ProjectIngestKeys (`rpd_` tokens, stored hashed) for future proxy traffic attribution.
+- Two auth surfaces (added in later work): humans via OIDC+JWT on the control plane/dashboard; agents via project ingest keys on the proxy.
+- Until auth lands, all writes default to the well-known default Organization/Project (`replayd.tenancy.DEFAULT_ORG_ID` / `DEFAULT_PROJECT_ID`).
+- DATA PLANE (proxy): reads a project ingest key from `INGEST_KEY_HEADER` (default `x-replayd-key`), resolves it via `storage.resolve_ingest_key`, and attributes captured exchanges to that project. Lenient by default — missing or invalid key → `DEFAULT_PROJECT_ID`; the request is always forwarded. `REQUIRE_INGEST_KEY=true` (opt-in) rejects missing/invalid keys with 401 before calling upstream. All `x-replayd-*` control headers (ingest key, run-id, replay, branch) are stripped before forwarding upstream so they never leak to the provider.
+- Frontend: Next.js dashboard in web/ (see FRONTEND section).
+
+AUTH:
+- Control-plane human auth is OIDC + JWT (RS256, validated via JWKS from the configured issuer). First login provisions a User from the JWT `sub` (JIT). A Principal abstraction unifies three cases: user (valid OIDC JWT), service (valid shared `REPLAYD_API_TOKEN`), anonymous (no auth configured = dev mode). Per-project authorization enforcement comes in a later prompt.
+- Self-hosted IdP in Docker Compose is **Logto** (`svhd/logto`). Control-plane OIDC env points at Logto. **CRITICAL docker gotcha:** `OIDC_ISSUER` must equal the token's `iss` claim (browser-facing, e.g. `http://localhost:3001/oidc`), while `OIDC_JWKS_URL` must be reachable from inside the control-plane container (internal Docker DNS, e.g. `http://logto:3001/oidc/jwks`). The verifier fetches keys from `OIDC_JWKS_URL` when set — never derive JWKS URL from the issuer in Docker.
+- **Dashboard (AUTH/DASHBOARD):** browser login is Auth.js (next-auth) generic OIDC against Logto (vendor-neutral by config). MUST request the API resource (`AUTH_OIDC_AUDIENCE` / RFC 8707 `resource` param) so the issued **access token** has `aud == OIDC_AUDIENCE` — the control plane validates the access token, not the id token. Access token is attached server-side via `/api/replayd` proxy (`Authorization: Bearer`). **Public vs internal OIDC:** `AUTH_OIDC_ISSUER` is public (browser redirect + id_token `iss`); `AUTH_OIDC_INTERNAL_ISSUER` is the Docker-internal issuer for server-side token/userinfo/JWKS calls (mirrors control-plane `OIDC_ISSUER` vs `OIDC_JWKS_URL`). When OIDC env is absent (`NEXT_PUBLIC_OIDC_ENABLED` false), dashboard runs open dev mode with no login.
+
+FRONTEND:
+- The dashboard is a Next.js (App Router) + TypeScript + Tailwind app in web/. It is a pure client of the control-plane API; it never touches storage or the proxy directly. Dev mode calls `NEXT_PUBLIC_REPLAYD_API_URL` directly; OIDC mode routes API calls through `/api/replayd` (server proxy via `CONTROL_PLANE_URL`, default `http://control-plane:8788`).
+- Aesthetic: clean, fast, intentional developer-tool look (think Linear/Vercel) — neutral palette, monospace for code/ids/paths, generous spacing, subtle borders, no templated bootstrap feel. Sentence case, no emoji.
+
+ARCHITECTURE:
+- src/ layout, package name `replayd`.
+- TWO PLANES: DATA PLANE = the transparent proxy (catch-all) that customers point agents at, on LISTEN_PORT. CONTROL PLANE = a separate FastAPI app (management API + later the dashboard) on MGMT_PORT, which only READS from storage. They are separate apps on separate ports sharing the same STORAGE_DIR. SQLite runs in WAL mode so the proxy (writer) and management API (reader) can access the DB concurrently across processes.
+- The proxy must be TRANSPARENT: an agent pointed at it behaves identically to talking to the upstream API directly, including streaming. Never alter request or response semantics.
+- BRING-YOUR-OWN-KEY: customers send their own provider API key through the proxy; replayd never holds or bills for model usage.
+- OPEN-CORE: the proxy + capture + replay engine must be self-hostable with no external dependencies beyond the provider API and local storage, so security-conscious teams can run it entirely in their own environment.
+
+REPLAY MODEL (precise):
+- Forensic replay = play back the saved recording without calling the model or tools. Byte-for-byte faithful BY CONSTRUCTION (we replay the record).
+- Sandbox replay = re-run the agent logic but serve cached/recorded responses, so execution is deterministic.
+- Branch replay = start from a chosen step, change a prompt/model/tool, and run forward (non-deterministic by design).
+- Design the capture format from the start to support all three.
+
+CORE INVARIANT: every step passing through the proxy must be captured losslessly and replayable byte-for-byte from the recorded trajectory.
+
+RUNS:
+- A RUN is an ordered sequence of exchanges sharing a run_id. The run_id comes from RUN_ID_HEADER (default "x-replayd-run-id") on the request; if absent, each exchange becomes its own singleton run (preserving transparency). Steps within a run are ordered by started_at.
+
+REPLAY (sandbox):
+- In replay mode (request carries REPLAY_HEADER = the target run_id), the proxy does NOT call upstream. It matches the incoming request to a recorded step in that run by request_body_hash and returns that step's recorded response byte-for-byte from storage. A request that matches no recorded step is a DIVERGENCE. Replayed responses are NOT re-captured.
+
+BRANCH (replay-then-live):
+- Branch mode is triggered by BRANCH_HEADER carrying the PARENT run_id. For each request, match it against the parent run by request_body_hash. On match -> serve the recorded response (origin="replayed"); on miss -> forward to the live upstream and capture it (origin="live"). Every step is captured into a NEW branch run (run_id from the run-id header, or generated), with parent_run_id set to the parent. The first "live" step is the divergence point.
+
+TESTS (regression):
+- A regression test references a baseline run_id and a comparison mode (`exact` or `semantic`). Running a test compares the baseline to a candidate run (a fresh recording of the same task) step-by-step. Exact mode compares request/response body hashes. Semantic mode compares structural decisions (model, message role sequence, finish_reason, tool/function names, argument key sets) and tolerates wording-only response differences. The test PASSES if every step matches under the chosen mode and step counts are equal; it FAILS at the first mismatch, reporting diff_kind (`none`, `wording`, `tool_call`, `finish_reason`, `structure`, `request`). Without a candidate run, the runner performs a self-baseline sanity check.
+
+PRODUCTION PRINCIPLES:
+- Async everywhere. Full type hints. Small, single-responsibility, tested modules.
+- All config via environment / .env (pydantic-settings). NEVER hardcode secrets, keys, or URLs.
+- Structured logging (not print). Explicit error handling on all upstream/network calls.
+- Deployable from day one: assume Docker + a cloud host. Clean startup/shutdown (FastAPI lifespan).
+- No premature abstraction, but no shortcuts that block production or open-core self-hosting.
+
+DEPLOYMENT:
+- Docker Compose (`docker compose up --build`) is the default production-shaped deployment: Postgres 16 for the relational index (`DATABASE_URL=postgresql+asyncpg://…`), MinIO for blobs (`BLOB_STORAGE_BACKEND=s3`, `BLOB_S3_ENDPOINT_URL=http://minio:9000`), **Logto** for OIDC (`svhd/logto` on ports 3001 auth / 3002 admin, separate `logto` Postgres database), proxy on 8787, control-plane on 8788, dashboard on 3000.
+- Logto uses its own Postgres database (`logto`) on the shared `postgres` service. A one-shot `logto-db-init` creates the database if absent; Logto seeds its schema on first start (`npm run cli db seed -- --swe`). One-time setup: open http://localhost:3002, create admin, create an API Resource (indicator → `OIDC_AUDIENCE`). Verify with `python -m replayd.check_oidc` or `GET /health/oidc`.
+- A one-shot `migrate` service runs `replayd-migrate` after Postgres is healthy and before proxy/control-plane start. Long-running services set `RUN_MIGRATIONS_ON_STARTUP=false` so they never race on schema changes.
+- Postgres credentials and `DATABASE_URL` are overridable via env (defaults: user/password/db `replayd`). Control-plane OIDC defaults: `OIDC_ISSUER=http://localhost:3001/oidc`, `OIDC_JWKS_URL=http://logto:3001/oidc/jwks`, `OIDC_AUDIENCE=http://localhost:8788`.
+- Local dev without Docker: omit `DATABASE_URL` to use SQLite at `{STORAGE_DIR}/replayd.db` with auto-migration on init (`RUN_MIGRATIONS_ON_STARTUP=true` by default). Blobs remain under `STORAGE_DIR/blobs/`. OIDC is optional (unset `OIDC_ISSUER` for dev-mode anonymous API access).

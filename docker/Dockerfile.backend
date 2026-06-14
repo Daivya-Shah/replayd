@@ -1,0 +1,19 @@
+FROM python:3.12-slim
+
+WORKDIR /app
+
+RUN groupadd --system replayd \
+    && useradd --system --gid replayd --home-dir /app --no-create-home replayd
+
+COPY pyproject.toml README.md alembic.ini ./
+COPY src ./src
+
+RUN pip install --no-cache-dir .
+
+RUN mkdir -p /data && chown replayd:replayd /data
+
+USER replayd
+
+EXPOSE 8787
+
+CMD ["uvicorn", "replayd.main:app", "--host", "0.0.0.0", "--port", "8787"]

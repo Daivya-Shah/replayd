@@ -1,0 +1,183 @@
+x-postgres-credentials: &postgres-credentials
+  POSTGRES_USER: ${POSTGRES_USER:-replayd}
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-replayd}
+  POSTGRES_DB: ${POSTGRES_DB:-replayd}
+
+x-database-url: &database-url
+  DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-replayd}:${POSTGRES_PASSWORD:-replayd}@postgres:5432/${POSTGRES_DB:-replayd}
+
+x-minio-credentials: &minio-credentials
+  MINIO_ROOT_USER: ${MINIO_ROOT_USER:-replayd}
+  MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-replaydminio}
+
+x-app-env: &app-env
+  DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-replayd}:${POSTGRES_PASSWORD:-replayd}@postgres:5432/${POSTGRES_DB:-replayd}
+  BLOB_STORAGE_BACKEND: s3
+  BLOB_S3_ENDPOINT_URL: http://minio:9000
+  BLOB_S3_BUCKET: replayd
+  BLOB_S3_REGION: us-east-1
+  BLOB_S3_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-replayd}
+  BLOB_S3_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-replaydminio}
+  STORAGE_DIR: /tmp/replayd
+  RUN_MIGRATIONS_ON_STARTUP: "false"
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      <<: *postgres-credentials
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./docker/postgres/init-logto-db.sh:/docker-entrypoint-initdb.d/02-init-logto-db.sh:ro
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-replayd} -d ${POSTGRES_DB:-replayd}",
+        ]
+      interval: 2s
+      timeout: 5s
+      retries: 15
+      start_period: 5s
+
+  logto-db-init:
+    image: postgres:16
+    environment:
+      PGUSER: ${POSTGRES_USER:-replayd}
+      PGPASSWORD: ${POSTGRES_PASSWORD:-replayd}
+    entrypoint:
+      - sh
+      - -c
+      - |
+        psql -h postgres -d postgres -tc "SELECT 1 FROM pg_database WHERE datname = 'logto'" | grep -q 1 \
+          || psql -h postgres -d postgres -c "CREATE DATABASE logto OWNER \"$$PGUSER\";"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  logto:
+    image: svhd/logto:${LOGTO_TAG:-latest}
+    entrypoint: ["sh", "-c", "npm run cli db seed -- --swe && npm start"]
+    ports:
+      - "3001:3001"
+      - "3002:3002"
+    environment:
+      TRUST_PROXY_HEADER: "1"
+      DB_URL: postgres://${POSTGRES_USER:-replayd}:${POSTGRES_PASSWORD:-replayd}@postgres:5432/logto
+      ENDPOINT: ${LOGTO_ENDPOINT:-http://localhost:3001}
+      ADMIN_ENDPOINT: ${LOGTO_ADMIN_ENDPOINT:-http://localhost:3002}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      logto-db-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:3001/api/status > /dev/null || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
+  minio:
+    image: minio/minio
+    command: server /data --console-address ":9001"
+    environment:
+      <<: *minio-credentials
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 2s
+      timeout: 5s
+      retries: 15
+      start_period: 5s
+
+  migrate:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.backend
+    command: replayd-migrate
+    environment:
+      <<: *database-url
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  proxy:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.backend
+    command: uvicorn replayd.main:app --host 0.0.0.0 --port 8787
+    ports:
+      - "8787:8787"
+    environment:
+      <<: *app-env
+      LISTEN_HOST: 0.0.0.0
+      # Change for other OpenAI-compatible providers (e.g. Azure, local vLLM).
+      UPSTREAM_BASE_URL: https://api.openai.com
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      minio:
+        condition: service_healthy
+
+  control-plane:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.backend
+    command: uvicorn replayd.management:app --host 0.0.0.0 --port 8788
+    ports:
+      - "8788:8788"
+    environment:
+      <<: *app-env
+      MGMT_HOST: 0.0.0.0
+      MGMT_CORS_ORIGIN: http://localhost:3000
+      # OIDC (Logto): issuer must match token 'iss' (browser-facing); JWKS URL is internal.
+      OIDC_ISSUER: ${OIDC_ISSUER:-http://localhost:3001/oidc}
+      OIDC_JWKS_URL: ${OIDC_JWKS_URL:-http://logto:3001/oidc/jwks}
+      OIDC_AUDIENCE: ${OIDC_AUDIENCE:-http://localhost:8788}
+      OIDC_ALGORITHMS: ${OIDC_ALGORITHMS:-ES384,RS256}
+      # Set for any non-local deployment so recorded prompts/responses are not public.
+      # REPLAYD_API_TOKEN: change-me-to-a-long-random-secret
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      minio:
+        condition: service_healthy
+      logto:
+        condition: service_healthy
+
+  dashboard:
+    build:
+      context: web
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_REPLAYD_API_URL: http://localhost:8788
+        NEXT_PUBLIC_OIDC_ENABLED: "true"
+    ports:
+      - "3000:3000"
+    environment:
+      AUTH_SECRET: ${AUTH_SECRET:-change-me-generate-with-openssl-rand-base64-32}
+      AUTH_URL: ${AUTH_URL:-http://localhost:3000}
+      AUTH_OIDC_ISSUER: ${AUTH_OIDC_ISSUER:-http://localhost:3001/oidc}
+      AUTH_OIDC_INTERNAL_ISSUER: ${AUTH_OIDC_INTERNAL_ISSUER:-http://logto:3001/oidc}
+      AUTH_OIDC_ID: ${AUTH_OIDC_ID:-}
+      AUTH_OIDC_SECRET: ${AUTH_OIDC_SECRET:-}
+      AUTH_OIDC_AUDIENCE: ${OIDC_AUDIENCE:-http://localhost:8788}
+      CONTROL_PLANE_URL: ${CONTROL_PLANE_URL:-http://control-plane:8788}
+    depends_on:
+      - control-plane
+      - logto
+
+volumes:
+  pgdata:
+  miniodata:

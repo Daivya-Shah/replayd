@@ -1,0 +1,54 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "replayd"
+version = "0.0.1"
+description = "Deterministic record-and-replay reliability layer for LLM agents"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    "httpx",
+    "pydantic>=2",
+    "pydantic-settings",
+    "aiosqlite",
+    "python-dotenv",
+    "sqlalchemy[asyncio]>=2.0",
+    "asyncpg",
+    "greenlet",
+    "alembic",
+    "boto3",
+    "pyjwt[crypto]",
+]
+
+[project.scripts]
+replayd-migrate = "replayd.migrate:main"
+replayd-check-oidc = "replayd.check_oidc:main"
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+    "anyio",
+    "openai",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/replayd"]
+
+[tool.hatch.build]
+sources = ["src"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/src",
+    "/tests",
+    "/README.md",
+]
