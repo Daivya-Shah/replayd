@@ -6,6 +6,8 @@ import { signOut, useSession } from "next-auth/react";
 
 import { isOidcEnabled } from "@/lib/oidc";
 
+import { ProjectSwitcher } from "./project-switcher";
+
 const links = [
   { href: "/", label: "Runs" },
   { href: "/tests", label: "Tests" },
@@ -55,22 +57,25 @@ export function AppNav() {
             );
           })}
         </div>
-        {oidcEnabled && session && (
-          <div className="flex items-center gap-4">
-            {session.user?.email && (
-              <span className="hidden text-sm text-zinc-600 dark:text-zinc-400 sm:inline">
-                {session.user.email}
-              </span>
-            )}
-            <button
-              type="button"
-              onClick={() => void signOut({ callbackUrl: "/sign-in" })}
-              className="text-sm text-zinc-600 transition hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white"
-            >
-              Sign out
-            </button>
-          </div>
-        )}
+        <div className="flex items-center gap-3">
+          {oidcEnabled && session && <ProjectSwitcher />}
+          {oidcEnabled && session && (
+            <div className="flex items-center gap-4">
+              {session.user?.email && (
+                <span className="hidden text-sm text-zinc-600 dark:text-zinc-400 sm:inline">
+                  {session.user.email}
+                </span>
+              )}
+              <button
+                type="button"
+                onClick={() => void signOut({ callbackUrl: "/sign-in" })}
+                className="text-sm text-zinc-600 transition hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white"
+              >
+                Sign out
+              </button>
+            </div>
+          )}
+        </div>
       </div>
     </nav>
   );

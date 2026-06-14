@@ -1,10 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { formatApiReachabilityMessage } from "@/lib/api-error-message";
 import { ApiReachabilityError, getTest, listTests } from "@/lib/api";
+import { useActiveProjectId } from "@/components/active-project-provider";
 import type { RegressionTest, TestResult } from "@/lib/types";
 
 type LoadState = "loading" | "ready" | "error";
@@ -48,15 +49,17 @@ export function TestsListClient({
   initialErrorUrl,
   initialErrorMessage,
 }: TestsListClientProps) {
+  const scopedProjectId = useActiveProjectId();
   const [rows, setRows] = useState(initialRows);
   const [total, setTotal] = useState(initialTotal);
   const [state, setState] = useState<LoadState>(initialErrorUrl ? "error" : "ready");
   const [errorMessage, setErrorMessage] = useState(initialErrorMessage);
+  const loadedProjectIdRef = useRef(scopedProjectId);
 
   const loadTests = useCallback(async () => {
     setState("loading");
     try {
-      const data = await listTests();
+      const data = await listTests(scopedProjectId);
       const enriched = await Promise.all(
         data.items.map(async (test) => {
           try {
@@ -77,7 +80,15 @@ export function TestsListClient({
         setErrorMessage(formatApiReachabilityMessage(error.url));
       }
     }
-  }, []);
+  }, [scopedProjectId]);
+
+  useEffect(() => {
+    if (scopedProjectId === loadedProjectIdRef.current) {
+      return;
+    }
+    loadedProjectIdRef.current = scopedProjectId;
+    void loadTests();
+  }, [scopedProjectId, loadTests]);
 
   return (
     <div className="min-h-full bg-zinc-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">

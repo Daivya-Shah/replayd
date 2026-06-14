@@ -1,10 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { formatApiReachabilityMessage } from "@/lib/api-error-message";
 import { ApiReachabilityError, listRuns } from "@/lib/api";
+import { useActiveProjectId } from "@/components/active-project-provider";
 import type { RunSummary } from "@/lib/types";
 
 type LoadState = "loading" | "ready" | "error";
@@ -52,11 +53,13 @@ export function RunsListClient({
   initialErrorUrl,
   initialErrorMessage,
 }: RunsListClientProps) {
+  const scopedProjectId = useActiveProjectId();
   const [items, setItems] = useState(initialItems);
   const [total, setTotal] = useState(initialTotal);
   const [state, setState] = useState<LoadState>(initialErrorUrl ? "error" : "ready");
   const [errorMessage, setErrorMessage] = useState(initialErrorMessage);
   const [refreshing, setRefreshing] = useState(false);
+  const loadedProjectIdRef = useRef(scopedProjectId);
 
   const loadRuns = useCallback(async (isRefresh = false) => {
     if (isRefresh) {
@@ -66,7 +69,7 @@ export function RunsListClient({
     }
 
     try {
-      const data = await listRuns();
+      const data = await listRuns(50, 0, scopedProjectId);
       setItems(data.items);
       setTotal(data.total);
       setState("ready");
@@ -79,7 +82,15 @@ export function RunsListClient({
     } finally {
       setRefreshing(false);
     }
-  }, []);
+  }, [scopedProjectId]);
+
+  useEffect(() => {
+    if (scopedProjectId === loadedProjectIdRef.current) {
+      return;
+    }
+    loadedProjectIdRef.current = scopedProjectId;
+    void loadRuns();
+  }, [scopedProjectId, loadRuns]);
 
   return (
     <div className="min-h-full bg-zinc-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">

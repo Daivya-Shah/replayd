@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { formatApiReachabilityMessage } from "@/lib/api-error-message";
 import {
@@ -9,6 +9,7 @@ import {
   listIngestKeys,
   revokeIngestKey,
 } from "@/lib/api";
+import { useActiveProjectId } from "@/components/active-project-provider";
 import { buildIngestKeyUsageSnippet } from "@/lib/proxy-url";
 import type { IngestKey } from "@/lib/types";
 
@@ -234,6 +235,7 @@ export function KeysListClient({
   initialErrorUrl,
   initialErrorMessage,
 }: KeysListClientProps) {
+  const scopedProjectId = useActiveProjectId();
   const [items, setItems] = useState(initialItems);
   const [total, setTotal] = useState(initialTotal);
   const [state, setState] = useState<LoadState>(initialErrorUrl ? "error" : "ready");
@@ -245,11 +247,12 @@ export function KeysListClient({
   const [tokenReveal, setTokenReveal] = useState<TokenReveal | null>(null);
   const [revokeTarget, setRevokeTarget] = useState<IngestKey | null>(null);
   const [revoking, setRevoking] = useState(false);
+  const loadedProjectIdRef = useRef(scopedProjectId);
 
   const loadKeys = useCallback(async () => {
     setState("loading");
     try {
-      const data = await listIngestKeys();
+      const data = await listIngestKeys(scopedProjectId);
       setItems(data.items);
       setTotal(data.total);
       setState("ready");
@@ -262,17 +265,25 @@ export function KeysListClient({
         setErrorMessage("Could not load ingest keys.");
       }
     }
-  }, []);
+  }, [scopedProjectId]);
+
+  useEffect(() => {
+    if (scopedProjectId === loadedProjectIdRef.current) {
+      return;
+    }
+    loadedProjectIdRef.current = scopedProjectId;
+    void loadKeys();
+  }, [scopedProjectId, loadKeys]);
 
   const handleCreate = async () => {
     setCreating(true);
     setCreateError(undefined);
     try {
-      const created = await createIngestKey(createName);
+      const created = await createIngestKey(createName, scopedProjectId);
       setShowCreateForm(false);
       setCreateName("");
       setTokenReveal({ token: created.token, name: created.name });
-      const data = await listIngestKeys();
+      const data = await listIngestKeys(scopedProjectId);
       setItems(data.items);
       setTotal(data.total);
       setState("ready");

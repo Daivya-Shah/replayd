@@ -2,8 +2,10 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 
 import { AppNav } from "@/components/app-nav";
+import { ActiveProjectProvider } from "@/components/active-project-provider";
 import { AuthSessionProvider } from "@/components/auth-session-provider";
 import { OidcAuthGate } from "@/components/oidc-auth-gate";
+import { resolveActiveProjectContext } from "@/lib/active-project";
 
 import "./globals.css";
 
@@ -22,11 +24,13 @@ export const metadata: Metadata = {
   description: "Record and inspect LLM agent runs",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const projectContext = await resolveActiveProjectContext();
+
   return (
     <html
       lang="en"
@@ -34,8 +38,10 @@ export default function RootLayout({
     >
       <body className="min-h-full flex flex-col">
         <AuthSessionProvider>
-          <AppNav />
-          <OidcAuthGate>{children}</OidcAuthGate>
+          <ActiveProjectProvider value={projectContext}>
+            <AppNav />
+            <OidcAuthGate>{children}</OidcAuthGate>
+          </ActiveProjectProvider>
         </AuthSessionProvider>
       </body>
     </html>
