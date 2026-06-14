@@ -20,12 +20,19 @@ from replayd.control_auth import (
 )
 from replayd.auth.oidc import OidcVerifier
 from replayd.auth.principal import Principal
+from replayd.auth.projects import (
+    create_project_for_principal,
+    list_projects_for_principal,
+    project_to_json,
+    rename_project_for_principal,
+)
 from replayd.auth.scoping import (
     exchange_in_read_scope,
     project_id_in_read_scope,
     regression_test_in_read_scope,
     resolve_ingest_key_list_project_ids,
     resolve_read_scope,
+    resolved_project_id,
     run_steps_in_read_scope,
 )
 from replayd.decoding import decode_body
@@ -51,6 +58,14 @@ class RunRegressionTestBody(BaseModel):
 class CreateIngestKeyBody(BaseModel):
     name: str | None = None
     project_id: str | None = None
+
+
+class CreateProjectBody(BaseModel):
+    name: str
+
+
+class RenameProjectBody(BaseModel):
+    name: str
 
 
 def _exchange_to_json(exchange: Exchange) -> dict[str, object]:
@@ -291,11 +306,15 @@ def create_management_app(
         baseline_steps = await store.get_run(body.baseline_run_id)
         if not baseline_steps:
             raise HTTPException(status_code=404, detail="baseline run not found")
+        scope = await resolve_read_scope(store, request.state.principal)
+        if not run_steps_in_read_scope(baseline_steps, scope):
+            raise HTTPException(status_code=404, detail="baseline run not found")
 
         test = RegressionTest(
             id=uuid.uuid4().hex,
             name=body.name,
             baseline_run_id=body.baseline_run_id,
+            project_id=resolved_project_id(baseline_steps[0].project_id),
             created_at=datetime.now(UTC),
             mode=body.mode,
         )
@@ -352,6 +371,49 @@ def create_management_app(
         if not deleted:
             raise HTTPException(status_code=404, detail="test not found")
         return Response(status_code=204)
+
+    @app.get("/api/projects")
+    async def list_projects(request: Request) -> dict[str, object]:
+        store: Storage = request.app.state.storage
+        items = await list_projects_for_principal(store, request.state.principal)
+        return {
+            "items": [project_to_json(item) for item in items],
+            "total": len(items),
+        }
+
+    @app.post("/api/projects", status_code=201)
+    async def create_project(
+        body: CreateProjectBody,
+        request: Request,
+    ) -> dict[str, object]:
+        store: Storage = request.app.state.storage
+        name = body.name.strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="name is required")
+        project = await create_project_for_principal(
+            store,
+            request.state.principal,
+            name=name,
+        )
+        return project_to_json(project)
+
+    @app.patch("/api/projects/{project_id}")
+    async def rename_project(
+        project_id: str,
+        body: RenameProjectBody,
+        request: Request,
+    ) -> dict[str, object]:
+        store: Storage = request.app.state.storage
+        name = body.name.strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="name is required")
+        project = await rename_project_for_principal(
+            store,
+            request.state.principal,
+            project_id,
+            name=name,
+        )
+        return project_to_json(project)
 
     @app.post("/api/ingest-keys", status_code=201)
     async def create_ingest_key(

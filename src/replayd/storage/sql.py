@@ -485,6 +485,67 @@ class SqlStorage(Storage):
             )
             return [_row_to_project(row) for row in result.scalars().all()]
 
+    async def list_all_projects(self) -> list[Project]:
+        session_factory = self._require_session_factory()
+        async with session_factory() as session:
+            result = await session.execute(
+                select(ProjectRow).order_by(
+                    ProjectRow.created_at.desc(),
+                    ProjectRow.id.desc(),
+                )
+            )
+            return [_row_to_project(row) for row in result.scalars().all()]
+
+    async def list_accessible_projects(self, user_id: str) -> list[Project]:
+        session_factory = self._require_session_factory()
+        async with session_factory() as session:
+            result = await session.execute(
+                select(ProjectRow)
+                .join(MembershipRow, MembershipRow.org_id == ProjectRow.org_id)
+                .where(MembershipRow.user_id == user_id)
+                .order_by(
+                    ProjectRow.created_at.desc(),
+                    ProjectRow.id.desc(),
+                )
+            )
+            return [_row_to_project(row) for row in result.scalars().all()]
+
+    async def project_slug_taken(
+        self,
+        org_id: str,
+        slug: str,
+        *,
+        exclude_project_id: str | None = None,
+    ) -> bool:
+        session_factory = self._require_session_factory()
+        async with session_factory() as session:
+            stmt = select(ProjectRow.id).where(
+                ProjectRow.org_id == org_id,
+                ProjectRow.slug == slug,
+            )
+            if exclude_project_id is not None:
+                stmt = stmt.where(ProjectRow.id != exclude_project_id)
+            result = await session.execute(stmt.limit(1))
+            return result.scalar_one_or_none() is not None
+
+    async def rename_project(
+        self,
+        project_id: str,
+        *,
+        name: str,
+        slug: str,
+    ) -> Project | None:
+        session_factory = self._require_session_factory()
+        async with session_factory() as session:
+            row = await session.get(ProjectRow, project_id)
+            if row is None:
+                return None
+            row.name = name
+            row.slug = slug
+            await session.commit()
+            await session.refresh(row)
+            return _row_to_project(row)
+
     async def create_user(self, user: User) -> None:
         session_factory = self._require_session_factory()
         async with session_factory() as session:

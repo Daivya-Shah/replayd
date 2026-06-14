@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 DEMO_MODEL = "gpt-4o-mini"
 DEMO_MAX_TOKENS = 40
+
+REPLAYD_INGEST_KEY_ENV = "REPLAYD_INGEST_KEY"
+INGEST_KEY_HEADER = "x-replayd-key"
 
 DEMO_STEP_PROMPTS = [
     "You are planning a short trip. In one sentence, name a city to visit.",
@@ -16,6 +20,15 @@ DEMO_STEP_PROMPTS = [
 BRANCH_STEP_1_PROMPT = (
     "You are planning an adventure trip. In one sentence, name a mountain destination to visit."
 )
+
+
+def proxy_default_headers(**headers: str) -> dict[str, str]:
+    """Build proxy control headers, optionally including REPLAYD_INGEST_KEY from the environment."""
+    merged = dict(headers)
+    ingest_key = os.environ.get(REPLAYD_INGEST_KEY_ENV)
+    if ingest_key:
+        merged[INGEST_KEY_HEADER] = ingest_key
+    return merged
 
 
 def demo_chat_steps() -> list[dict[str, Any]]:

@@ -259,6 +259,62 @@ class Storage(ABC):
 
     @abstractmethod
 
+    async def list_all_projects(self) -> list[Project]:
+
+        """Return all projects ordered by created_at descending."""
+
+
+
+    @abstractmethod
+
+    async def list_accessible_projects(self, user_id: str) -> list[Project]:
+
+        """Return projects reachable via the user's org memberships."""
+
+
+
+    @abstractmethod
+
+    async def project_slug_taken(
+
+        self,
+
+        org_id: str,
+
+        slug: str,
+
+        *,
+
+        exclude_project_id: str | None = None,
+
+    ) -> bool:
+
+        """Return True when slug is already used within the organization."""
+
+
+
+    @abstractmethod
+
+    async def rename_project(
+
+        self,
+
+        project_id: str,
+
+        *,
+
+        name: str,
+
+        slug: str,
+
+    ) -> Project | None:
+
+        """Rename a project and update its slug. Returns None when missing."""
+
+
+
+    @abstractmethod
+
     async def create_user(self, user: User) -> None:
 
         """Persist a new user."""

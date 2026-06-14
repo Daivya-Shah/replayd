@@ -263,3 +263,62 @@ async def test_unscoped_principal_sees_all_runs_and_tests(
     assert test_b in test_ids
     assert runs.json()["total"] >= 2
     assert tests.json()["total"] >= 2
+
+
+@pytest.mark.asyncio
+async def test_create_test_from_run_appears_in_user_test_list(
+    core_storage: Storage,
+    rsa_keypair: tuple[object, object],
+    tmp_path: Path,
+) -> None:
+    private_key, public_key = rsa_keypair
+    settings = _oidc_settings(tmp_path)
+    client, app = _management_client(
+        core_storage,
+        settings,
+        _verifier_for_public_key(settings, public_key),
+    )
+
+    subject = f"create-test-user-{uuid.uuid4().hex[:8]}"
+    _, project_id = await _provision_user(
+        core_storage,
+        subject=subject,
+        email="create-test@example.com",
+    )
+    run_id = f"run-create-test-{uuid.uuid4().hex}"
+    await core_storage.save_exchange(
+        _sample_exchange(
+            exchange_id=f"exchange-create-test-{uuid.uuid4().hex}",
+            run_id=run_id,
+            project_id=project_id,
+        )
+    )
+
+    token = _mint_jwt(private_key, sub=subject, email="create-test@example.com")
+    headers = {"Authorization": f"Bearer {token}"}
+
+    async with app.router.lifespan_context(app):
+        async with client:
+            create_resp = await client.post(
+                "/api/tests",
+                json={
+                    "name": "Saved baseline",
+                    "baseline_run_id": run_id,
+                    "mode": "semantic",
+                },
+                headers=headers,
+            )
+            list_resp = await client.get("/api/tests", headers=headers)
+
+    assert create_resp.status_code == 201
+    created = create_resp.json()
+    assert created["baseline_run_id"] == run_id
+
+    assert list_resp.status_code == 200
+    payload = list_resp.json()
+    assert payload["total"] == 1
+    assert payload["items"][0]["id"] == created["id"]
+
+    stored = await core_storage.get_test(created["id"])
+    assert stored is not None
+    assert stored.project_id == project_id

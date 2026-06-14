@@ -11,7 +11,7 @@ load_dotenv()
 
 from openai import APIError, APIStatusError, OpenAI
 
-from agent_steps import run_demo_chat_steps
+from agent_steps import proxy_default_headers, run_demo_chat_steps
 
 PROXY_BASE_URL = "http://127.0.0.1:8787/v1"
 REPLAY_HEADER = "x-replayd-replay"
@@ -32,13 +32,13 @@ def main() -> None:
     client = OpenAI(
         api_key=api_key,
         base_url=PROXY_BASE_URL,
-        default_headers={REPLAY_HEADER: run_id},
+        default_headers=proxy_default_headers(**{REPLAY_HEADER: run_id}),
     )
 
     print(f"Replaying run: {run_id}")
 
     try:
-        replay_headers = {REPLAY_HEADER: run_id}
+        replay_headers = proxy_default_headers(**{REPLAY_HEADER: run_id})
         replies = run_demo_chat_steps(client, extra_headers=replay_headers)
         for step, reply in enumerate(replies, start=1):
             print(f"Step {step}: {reply.strip()}")

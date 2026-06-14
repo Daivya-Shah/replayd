@@ -12,7 +12,7 @@ load_dotenv()
 
 from openai import APIError, APIStatusError, OpenAI
 
-from agent_steps import branch_chat_steps
+from agent_steps import branch_chat_steps, proxy_default_headers
 
 PROXY_BASE_URL = "http://127.0.0.1:8787/v1"
 RUN_ID_HEADER = "x-replayd-run-id"
@@ -41,16 +41,20 @@ def main() -> None:
     client = OpenAI(
         api_key=api_key,
         base_url=PROXY_BASE_URL,
-        default_headers={
-            BRANCH_HEADER: parent_run_id,
-            RUN_ID_HEADER: branch_run_id,
-        },
+        default_headers=proxy_default_headers(
+            **{
+                BRANCH_HEADER: parent_run_id,
+                RUN_ID_HEADER: branch_run_id,
+            }
+        ),
     )
 
-    request_headers = {
-        BRANCH_HEADER: parent_run_id,
-        RUN_ID_HEADER: branch_run_id,
-    }
+    request_headers = proxy_default_headers(
+        **{
+            BRANCH_HEADER: parent_run_id,
+            RUN_ID_HEADER: branch_run_id,
+        }
+    )
 
     print(f"Parent run id: {parent_run_id}")
     print(f"Branch run id: {branch_run_id}")

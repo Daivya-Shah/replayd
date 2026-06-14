@@ -23,6 +23,12 @@ def _slugify(value: str) -> str:
     return slug or "org"
 
 
+def slugify_name(value: str) -> str:
+    """Slugify a display name for use as a project slug."""
+    slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
+    return slug or "project"
+
+
 def derive_organization_name(
     *,
     email: str,
