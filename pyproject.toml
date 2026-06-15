@@ -27,6 +27,7 @@ dependencies = [
 [project.scripts]
 replayd-migrate = "replayd.migrate:main"
 replayd-check-oidc = "replayd.check_oidc:main"
+replayd-test = "replayd.cli.test_cmd:main"
 
 [project.optional-dependencies]
 dev = [
