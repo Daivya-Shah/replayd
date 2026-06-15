@@ -5,9 +5,11 @@ import { AppNav } from "@/components/app-nav";
 import { ActiveProjectProvider } from "@/components/active-project-provider";
 import { AuthSessionProvider } from "@/components/auth-session-provider";
 import { IncomingInvitationsBanner } from "@/components/incoming-invitations-banner";
+import { MeProvider } from "@/components/me-provider";
 import { OidcAuthGate } from "@/components/oidc-auth-gate";
 import { resolveActiveProjectContext } from "@/lib/active-project";
 import { resolveIncomingInvitations } from "@/lib/incoming-invitations";
+import { resolveMeProfile } from "@/lib/me";
 
 import "./globals.css";
 
@@ -33,6 +35,7 @@ export default async function RootLayout({
 }>) {
   const projectContext = await resolveActiveProjectContext();
   const incomingInvitations = await resolveIncomingInvitations();
+  const meProfile = await resolveMeProfile();
 
   return (
     <html
@@ -41,13 +44,15 @@ export default async function RootLayout({
     >
       <body className="min-h-full flex flex-col">
         <AuthSessionProvider>
-          <ActiveProjectProvider value={projectContext}>
-            <AppNav />
-            <OidcAuthGate>
-              <IncomingInvitationsBanner initialInvitations={incomingInvitations} />
-              {children}
-            </OidcAuthGate>
-          </ActiveProjectProvider>
+          <MeProvider profile={meProfile}>
+            <ActiveProjectProvider value={projectContext}>
+              <AppNav />
+              <OidcAuthGate>
+                <IncomingInvitationsBanner initialInvitations={incomingInvitations} />
+                {children}
+              </OidcAuthGate>
+            </ActiveProjectProvider>
+          </MeProvider>
         </AuthSessionProvider>
       </body>
     </html>

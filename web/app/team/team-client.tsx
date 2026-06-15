@@ -2,6 +2,7 @@
 
 import { useCallback, useState } from "react";
 
+import { useMeProfile } from "@/components/me-provider";
 import { formatApiReachabilityMessage } from "@/lib/api-error-message";
 import {
   ApiReachabilityError,
@@ -10,17 +11,23 @@ import {
   listInvitations,
   listMembers,
   MemberRemoveError,
+  PermissionError,
   removeMember,
   revokeInvitation,
 } from "@/lib/api";
-import type { Invitation, OrgMember, OrgRole, UserMeProfile } from "@/lib/types";
+import {
+  canInvite,
+  canRemoveMemberRow,
+  canRevokeInvitation,
+  primaryOrgRole,
+} from "@/lib/permissions";
+import type { Invitation, OrgMember, OrgRole } from "@/lib/types";
 
 type LoadState = "loading" | "ready" | "error";
 
 type TeamClientProps = {
   initialMembers: OrgMember[];
   initialInvitations: Invitation[];
-  initialCurrentUser: UserMeProfile | null;
   initialErrorUrl?: string;
   initialErrorMessage?: string;
 };
@@ -55,47 +62,11 @@ function roleBadgeClass(role: string): string {
   return "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900/50 dark:bg-emerald-950/40 dark:text-emerald-300";
 }
 
-function primaryOrgRole(currentUser: UserMeProfile | null): string | undefined {
-  if (!currentUser) {
-    return undefined;
-  }
-  return currentUser.memberships.find((membership) => membership.is_primary)?.role;
-}
-
-function countOwners(members: OrgMember[]): number {
-  return members.filter((member) => member.role === "owner").length;
-}
-
-function canRemoveMember(
-  member: OrgMember,
-  members: OrgMember[],
-  currentUser: UserMeProfile | null,
-): boolean {
-  const ownerCount = countOwners(members);
-  if (member.role === "owner" && ownerCount <= 1) {
-    return false;
-  }
-
-  if (!currentUser) {
-    return false;
-  }
-
-  const isSelf =
-    member.user_id === currentUser.user_id ||
-    member.email.toLowerCase() === currentUser.email.toLowerCase();
-  if (isSelf) {
-    return true;
-  }
-
-  const actorRole = primaryOrgRole(currentUser);
-  return actorRole === "owner" || actorRole === "admin";
-}
-
 function showMemberActionsColumn(
   members: OrgMember[],
-  currentUser: UserMeProfile | null,
+  profile: ReturnType<typeof useMeProfile>,
 ): boolean {
-  return members.some((member) => canRemoveMember(member, members, currentUser));
+  return members.some((member) => canRemoveMemberRow(member, members, profile));
 }
 
 function RemoveMemberConfirmModal({
@@ -209,13 +180,16 @@ function RevokeConfirmModal({
 export function TeamClient({
   initialMembers,
   initialInvitations,
-  initialCurrentUser,
   initialErrorUrl,
   initialErrorMessage,
 }: TeamClientProps) {
+  const profile = useMeProfile();
+  const teamRole = primaryOrgRole(profile);
+  const inviteAllowed = canInvite(teamRole);
+  const revokeInviteAllowed = canRevokeInvitation(teamRole);
+
   const [members, setMembers] = useState(initialMembers);
   const [invitations, setInvitations] = useState(initialInvitations);
-  const [currentUser] = useState(initialCurrentUser);
   const [state, setState] = useState<LoadState>(
     initialErrorUrl ? "error" : "ready",
   );
@@ -226,11 +200,14 @@ export function TeamClient({
   const [inviteError, setInviteError] = useState<string>();
   const [revokeTarget, setRevokeTarget] = useState<Invitation | null>(null);
   const [revoking, setRevoking] = useState(false);
+  const [revokeError, setRevokeError] = useState<string>();
   const [removeTarget, setRemoveTarget] = useState<OrgMember | null>(null);
   const [removing, setRemoving] = useState(false);
   const [removeError, setRemoveError] = useState<string>();
 
-  const memberActionsVisible = showMemberActionsColumn(members, currentUser);
+  const memberActionsVisible = showMemberActionsColumn(members, profile);
+  const showInvitationsSection =
+    inviteAllowed || revokeInviteAllowed || invitations.length > 0;
 
   const refreshTeam = useCallback(async () => {
     setState("loading");
@@ -268,6 +245,8 @@ export function TeamClient({
     } catch (error) {
       if (error instanceof InvitationConflictError) {
         setInviteError(error.message);
+      } else if (error instanceof PermissionError) {
+        setInviteError(error.message);
       } else if (error instanceof ApiReachabilityError) {
         setInviteError(formatApiReachabilityMessage(error.url));
       } else {
@@ -283,6 +262,7 @@ export function TeamClient({
       return;
     }
     setRevoking(true);
+    setRevokeError(undefined);
     try {
       await revokeInvitation(revokeTarget.id);
       setRevokeTarget(null);
@@ -290,10 +270,13 @@ export function TeamClient({
       setInvitations(invitationsData.items);
       setState("ready");
       setErrorMessage(undefined);
-    } catch {
+    } catch (error) {
       setRevokeTarget(null);
-      setState("error");
-      setErrorMessage("Could not revoke invitation.");
+      if (error instanceof PermissionError) {
+        setRevokeError(error.message);
+      } else {
+        setRevokeError("Could not revoke invitation.");
+      }
     } finally {
       setRevoking(false);
     }
@@ -349,8 +332,9 @@ export function TeamClient({
         <header className="space-y-2 border-b border-zinc-200 pb-8 dark:border-zinc-800">
           <h1 className="text-2xl font-semibold tracking-tight">Team</h1>
           <p className="max-w-xl text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-            Manage members and invitations for your organization. Invited people
-            join automatically when they sign in with a verified email match.
+            {inviteAllowed
+              ? "Manage members and invitations for your organization. Invited people must accept before they join."
+              : "View members of your organization."}
           </p>
         </header>
 
@@ -387,7 +371,9 @@ export function TeamClient({
 
               {members.length <= 1 ? (
                 <div className="rounded-lg border border-zinc-200 bg-white px-6 py-10 text-sm leading-6 text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
-                  Just you so far. Invite someone below to grow the team.
+                  {inviteAllowed
+                    ? "Just you so far. Invite someone below to grow the team."
+                    : "Just you so far."}
                 </div>
               ) : (
                 <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
@@ -425,7 +411,7 @@ export function TeamClient({
                           </td>
                           {memberActionsVisible && (
                             <td className="whitespace-nowrap px-4 py-3 text-right text-sm">
-                              {canRemoveMember(member, members, currentUser) ? (
+                              {canRemoveMemberRow(member, members, profile) ? (
                                 <button
                                   type="button"
                                   onClick={() => {
@@ -450,131 +436,147 @@ export function TeamClient({
               )}
             </section>
 
-            <section className="space-y-4">
-              <div className="space-y-1">
-                <h2 className="text-lg font-semibold tracking-tight">
-                  Pending invitations
-                </h2>
-                <p className="text-sm text-zinc-600 dark:text-zinc-400">
-                  {invitations.length} pending invitation
-                  {invitations.length === 1 ? "" : "s"}
-                </p>
-              </div>
-
-              <div className="rounded-lg border border-zinc-200 bg-white px-6 py-5 dark:border-zinc-800 dark:bg-zinc-900">
-                <form
-                  className="flex flex-col gap-4 lg:flex-row lg:items-end"
-                  onSubmit={(event) => void handleInvite(event)}
-                >
-                  <div className="flex-1 space-y-2">
-                    <label
-                      htmlFor="invite-email"
-                      className="block text-sm font-medium text-zinc-900 dark:text-zinc-100"
-                    >
-                      Email
-                    </label>
-                    <input
-                      id="invite-email"
-                      type="email"
-                      value={inviteEmail}
-                      onChange={(event) => {
-                        setInviteEmail(event.target.value);
-                        setInviteError(undefined);
-                      }}
-                      placeholder="colleague@company.com"
-                      required
-                      className="h-9 w-full rounded-md border border-zinc-200 bg-white px-3 text-sm text-zinc-900 outline-none ring-zinc-400 transition focus:ring-2 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
-                    />
-                  </div>
-                  <div className="space-y-2 lg:w-40">
-                    <label
-                      htmlFor="invite-role"
-                      className="block text-sm font-medium text-zinc-900 dark:text-zinc-100"
-                    >
-                      Role
-                    </label>
-                    <select
-                      id="invite-role"
-                      value={inviteRole}
-                      onChange={(event) =>
-                        setInviteRole(event.target.value as OrgRole)
-                      }
-                      className="h-9 w-full rounded-md border border-zinc-200 bg-white px-3 text-sm text-zinc-900 outline-none ring-zinc-400 transition focus:ring-2 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
-                    >
-                      {ROLE_OPTIONS.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <button
-                    type="submit"
-                    disabled={inviting || !inviteEmail.trim()}
-                    className="inline-flex h-9 items-center justify-center rounded-md bg-zinc-900 px-4 text-sm font-medium text-white transition hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white"
-                  >
-                    {inviting ? "Sending..." : "Send invitation"}
-                  </button>
-                </form>
-                {inviteError && (
-                  <p className="mt-3 text-sm text-red-700 dark:text-red-300">
-                    {inviteError}
+            {showInvitationsSection && (
+              <section className="space-y-4">
+                <div className="space-y-1">
+                  <h2 className="text-lg font-semibold tracking-tight">
+                    Pending invitations
+                  </h2>
+                  <p className="text-sm text-zinc-600 dark:text-zinc-400">
+                    {invitations.length} pending invitation
+                    {invitations.length === 1 ? "" : "s"}
                   </p>
-                )}
-              </div>
+                </div>
 
-              {invitations.length === 0 ? (
-                <div className="rounded-lg border border-zinc-200 bg-white px-6 py-10 text-sm leading-6 text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
-                  No pending invitations.
-                </div>
-              ) : (
-                <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
-                  <table className="min-w-full divide-y divide-zinc-200 dark:divide-zinc-800">
-                    <thead className="bg-zinc-50 dark:bg-zinc-950/60">
-                      <tr className="text-left text-xs font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-                        <th className="px-4 py-3">Email</th>
-                        <th className="px-4 py-3">Role</th>
-                        <th className="px-4 py-3">Invited</th>
-                        <th className="px-4 py-3">
-                          <span className="sr-only">Actions</span>
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800">
-                      {invitations.map((invitation) => (
-                        <tr
-                          key={invitation.id}
-                          className="transition hover:bg-zinc-50 dark:hover:bg-zinc-950/40"
+                {inviteAllowed && (
+                  <div className="rounded-lg border border-zinc-200 bg-white px-6 py-5 dark:border-zinc-800 dark:bg-zinc-900">
+                    <form
+                      className="flex flex-col gap-4 lg:flex-row lg:items-end"
+                      onSubmit={(event) => void handleInvite(event)}
+                    >
+                      <div className="flex-1 space-y-2">
+                        <label
+                          htmlFor="invite-email"
+                          className="block text-sm font-medium text-zinc-900 dark:text-zinc-100"
                         >
-                          <td className="px-4 py-3 text-sm text-zinc-900 dark:text-zinc-100">
-                            {invitation.email}
-                          </td>
-                          <td className="whitespace-nowrap px-4 py-3 text-sm">
-                            <span
-                              className={`inline-flex rounded-full border px-2.5 py-0.5 text-xs font-medium capitalize ${roleBadgeClass(invitation.role)}`}
-                            >
-                              {invitation.role}
-                            </span>
-                          </td>
-                          <td className="whitespace-nowrap px-4 py-3 text-sm text-zinc-600 dark:text-zinc-400">
-                            {formatTime(invitation.created_at)}
-                          </td>
-                          <td className="whitespace-nowrap px-4 py-3 text-right text-sm">
-                            <button
-                              type="button"
-                              onClick={() => setRevokeTarget(invitation)}
-                              className="text-zinc-600 transition hover:text-red-700 dark:text-zinc-400 dark:hover:text-red-300"
-                            >
-                              Revoke
-                            </button>
-                          </td>
+                          Email
+                        </label>
+                        <input
+                          id="invite-email"
+                          type="email"
+                          value={inviteEmail}
+                          onChange={(event) => {
+                            setInviteEmail(event.target.value);
+                            setInviteError(undefined);
+                          }}
+                          placeholder="colleague@company.com"
+                          required
+                          className="h-9 w-full rounded-md border border-zinc-200 bg-white px-3 text-sm text-zinc-900 outline-none ring-zinc-400 transition focus:ring-2 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
+                        />
+                      </div>
+                      <div className="space-y-2 lg:w-40">
+                        <label
+                          htmlFor="invite-role"
+                          className="block text-sm font-medium text-zinc-900 dark:text-zinc-100"
+                        >
+                          Role
+                        </label>
+                        <select
+                          id="invite-role"
+                          value={inviteRole}
+                          onChange={(event) =>
+                            setInviteRole(event.target.value as OrgRole)
+                          }
+                          className="h-9 w-full rounded-md border border-zinc-200 bg-white px-3 text-sm text-zinc-900 outline-none ring-zinc-400 transition focus:ring-2 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
+                        >
+                          {ROLE_OPTIONS.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <button
+                        type="submit"
+                        disabled={inviting || !inviteEmail.trim()}
+                        className="inline-flex h-9 items-center justify-center rounded-md bg-zinc-900 px-4 text-sm font-medium text-white transition hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white"
+                      >
+                        {inviting ? "Sending..." : "Send invitation"}
+                      </button>
+                    </form>
+                    {inviteError && (
+                      <p className="mt-3 text-sm text-red-700 dark:text-red-300">
+                        {inviteError}
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {invitations.length === 0 ? (
+                  inviteAllowed ? (
+                    <div className="rounded-lg border border-zinc-200 bg-white px-6 py-10 text-sm leading-6 text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
+                      No pending invitations.
+                    </div>
+                  ) : null
+                ) : (
+                  <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
+                    <table className="min-w-full divide-y divide-zinc-200 dark:divide-zinc-800">
+                      <thead className="bg-zinc-50 dark:bg-zinc-950/60">
+                        <tr className="text-left text-xs font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                          <th className="px-4 py-3">Email</th>
+                          <th className="px-4 py-3">Role</th>
+                          <th className="px-4 py-3">Invited</th>
+                          {revokeInviteAllowed && (
+                            <th className="px-4 py-3">
+                              <span className="sr-only">Actions</span>
+                            </th>
+                          )}
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </section>
+                      </thead>
+                      <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800">
+                        {invitations.map((invitation) => (
+                          <tr
+                            key={invitation.id}
+                            className="transition hover:bg-zinc-50 dark:hover:bg-zinc-950/40"
+                          >
+                            <td className="px-4 py-3 text-sm text-zinc-900 dark:text-zinc-100">
+                              {invitation.email}
+                            </td>
+                            <td className="whitespace-nowrap px-4 py-3 text-sm">
+                              <span
+                                className={`inline-flex rounded-full border px-2.5 py-0.5 text-xs font-medium capitalize ${roleBadgeClass(invitation.role)}`}
+                              >
+                                {invitation.role}
+                              </span>
+                            </td>
+                            <td className="whitespace-nowrap px-4 py-3 text-sm text-zinc-600 dark:text-zinc-400">
+                              {formatTime(invitation.created_at)}
+                            </td>
+                            {revokeInviteAllowed && (
+                              <td className="whitespace-nowrap px-4 py-3 text-right text-sm">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setRevokeError(undefined);
+                                    setRevokeTarget(invitation);
+                                  }}
+                                  className="text-zinc-600 transition hover:text-red-700 dark:text-zinc-400 dark:hover:text-red-300"
+                                >
+                                  Revoke
+                                </button>
+                              </td>
+                            )}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+                {revokeError && (
+                  <p className="text-sm text-red-700 dark:text-red-300">{revokeError}</p>
+                )}
+              </section>
+            )}
           </>
         )}
       </div>

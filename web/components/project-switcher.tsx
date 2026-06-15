@@ -8,6 +8,8 @@ import {
   switchActiveProject,
 } from "@/app/actions/project";
 import { useActiveProject } from "@/components/active-project-provider";
+import { useMeProfile } from "@/components/me-provider";
+import { canCreateProject, orgRoleForProject } from "@/lib/permissions";
 
 function ProjectMenuItem({
   project,
@@ -40,7 +42,10 @@ function ProjectMenuItem({
 
 export function ProjectSwitcher() {
   const router = useRouter();
+  const profile = useMeProfile();
   const { scopingEnabled, activeProject, projects, selectProject } = useActiveProject();
+  const projectOrgRole = orgRoleForProject(profile, activeProject?.organization_id);
+  const createProjectAllowed = canCreateProject(projectOrgRole);
   const [open, setOpen] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [projectName, setProjectName] = useState("");
@@ -135,49 +140,53 @@ export function ProjectSwitcher() {
             ))}
           </div>
 
-          <div className="my-2 border-t border-zinc-200 dark:border-zinc-800" />
+          {createProjectAllowed && (
+            <>
+              <div className="my-2 border-t border-zinc-200 dark:border-zinc-800" />
 
-          {!showCreate ? (
-            <button
-              type="button"
-              onClick={() => setShowCreate(true)}
-              className="flex w-full rounded-md px-3 py-2 text-left text-sm font-medium text-zinc-900 transition hover:bg-zinc-50 dark:text-zinc-100 dark:hover:bg-zinc-900/60"
-            >
-              New project
-            </button>
-          ) : (
-            <form className="space-y-2 px-1" onSubmit={handleCreate}>
-              <label className="block text-xs font-medium text-zinc-600 dark:text-zinc-400">
-                Project name
-              </label>
-              <input
-                type="text"
-                value={projectName}
-                onChange={(event) => setProjectName(event.target.value)}
-                placeholder="Staging"
-                className="h-8 w-full rounded-md border border-zinc-200 bg-white px-2.5 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
-                autoFocus
-              />
-              <div className="flex gap-2">
-                <button
-                  type="submit"
-                  disabled={isPending || !projectName.trim()}
-                  className="inline-flex h-8 flex-1 items-center justify-center rounded-md bg-zinc-900 text-sm font-medium text-white transition hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white"
-                >
-                  {isPending ? "Creating..." : "Create"}
-                </button>
+              {!showCreate ? (
                 <button
                   type="button"
-                  onClick={() => {
-                    setShowCreate(false);
-                    setProjectName("");
-                  }}
-                  className="inline-flex h-8 items-center rounded-md border border-zinc-200 bg-white px-3 text-sm text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                  onClick={() => setShowCreate(true)}
+                  className="flex w-full rounded-md px-3 py-2 text-left text-sm font-medium text-zinc-900 transition hover:bg-zinc-50 dark:text-zinc-100 dark:hover:bg-zinc-900/60"
                 >
-                  Cancel
+                  New project
                 </button>
-              </div>
-            </form>
+              ) : (
+                <form className="space-y-2 px-1" onSubmit={handleCreate}>
+                  <label className="block text-xs font-medium text-zinc-600 dark:text-zinc-400">
+                    Project name
+                  </label>
+                  <input
+                    type="text"
+                    value={projectName}
+                    onChange={(event) => setProjectName(event.target.value)}
+                    placeholder="Staging"
+                    className="h-8 w-full rounded-md border border-zinc-200 bg-white px-2.5 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+                    autoFocus
+                  />
+                  <div className="flex gap-2">
+                    <button
+                      type="submit"
+                      disabled={isPending || !projectName.trim()}
+                      className="inline-flex h-8 flex-1 items-center justify-center rounded-md bg-zinc-900 text-sm font-medium text-white transition hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white"
+                    >
+                      {isPending ? "Creating..." : "Create"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowCreate(false);
+                        setProjectName("");
+                      }}
+                      className="inline-flex h-8 items-center rounded-md border border-zinc-200 bg-white px-3 text-sm text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </form>
+              )}
+            </>
           )}
 
           {error && (

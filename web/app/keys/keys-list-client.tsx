@@ -7,10 +7,17 @@ import {
   ApiReachabilityError,
   createIngestKey,
   listIngestKeys,
+  PermissionError,
   revokeIngestKey,
 } from "@/lib/api";
-import { useActiveProjectId } from "@/components/active-project-provider";
+import { useActiveProject, useActiveProjectId } from "@/components/active-project-provider";
+import { useMeProfile } from "@/components/me-provider";
 import { buildIngestKeyUsageSnippet } from "@/lib/proxy-url";
+import {
+  canCreateKey,
+  canRevokeKey,
+  orgRoleForProject,
+} from "@/lib/permissions";
 import type { IngestKey } from "@/lib/types";
 
 type LoadState = "loading" | "ready" | "error";
@@ -235,6 +242,12 @@ export function KeysListClient({
   initialErrorUrl,
   initialErrorMessage,
 }: KeysListClientProps) {
+  const profile = useMeProfile();
+  const { activeProject } = useActiveProject();
+  const projectOrgRole = orgRoleForProject(profile, activeProject?.organization_id);
+  const createKeyAllowed = canCreateKey(projectOrgRole);
+  const revokeKeyAllowed = canRevokeKey(projectOrgRole);
+
   const scopedProjectId = useActiveProjectId();
   const [items, setItems] = useState(initialItems);
   const [total, setTotal] = useState(initialTotal);
@@ -247,6 +260,7 @@ export function KeysListClient({
   const [tokenReveal, setTokenReveal] = useState<TokenReveal | null>(null);
   const [revokeTarget, setRevokeTarget] = useState<IngestKey | null>(null);
   const [revoking, setRevoking] = useState(false);
+  const [revokeError, setRevokeError] = useState<string>();
   const loadedProjectIdRef = useRef(scopedProjectId);
 
   const loadKeys = useCallback(async () => {
@@ -289,7 +303,9 @@ export function KeysListClient({
       setState("ready");
       setErrorMessage(undefined);
     } catch (error) {
-      if (error instanceof ApiReachabilityError) {
+      if (error instanceof PermissionError) {
+        setCreateError(error.message);
+      } else if (error instanceof ApiReachabilityError) {
         setCreateError(formatApiReachabilityMessage(error.url));
       } else {
         setCreateError("Could not create ingest key.");
@@ -304,14 +320,18 @@ export function KeysListClient({
       return;
     }
     setRevoking(true);
+    setRevokeError(undefined);
     try {
       await revokeIngestKey(revokeTarget.id);
       setRevokeTarget(null);
       await loadKeys();
-    } catch {
+    } catch (error) {
       setRevokeTarget(null);
-      setState("error");
-      setErrorMessage("Could not revoke ingest key.");
+      if (error instanceof PermissionError) {
+        setRevokeError(error.message);
+      } else {
+        setRevokeError("Could not revoke ingest key.");
+      }
     } finally {
       setRevoking(false);
     }
@@ -339,7 +359,7 @@ export function KeysListClient({
               Ingest keys attribute proxy traffic to your project so captured runs show up here.
             </p>
           </div>
-          {!showCreateForm && (
+          {!showCreateForm && createKeyAllowed && (
             <button
               type="button"
               onClick={() => {
@@ -357,7 +377,7 @@ export function KeysListClient({
           <UsageSnippet />
         </section>
 
-        {showCreateForm && (
+        {showCreateForm && createKeyAllowed && (
           <section className="rounded-lg border border-zinc-200 bg-white px-6 py-5 dark:border-zinc-800 dark:bg-zinc-900">
             <form
               className="flex flex-col gap-4 sm:flex-row sm:items-end"
@@ -424,7 +444,9 @@ export function KeysListClient({
 
         {state === "ready" && items.length === 0 && (
           <div className="rounded-lg border border-zinc-200 bg-white px-6 py-10 text-sm leading-6 text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
-            No ingest keys yet. Create one to start capturing runs into your project.
+            {createKeyAllowed
+              ? "No ingest keys yet. Create one to start capturing runs into your project."
+              : "No ingest keys yet."}
           </div>
         )}
 
@@ -442,9 +464,11 @@ export function KeysListClient({
                     <th className="px-4 py-3">Created</th>
                     <th className="px-4 py-3">Last used</th>
                     <th className="px-4 py-3">Status</th>
-                    <th className="px-4 py-3">
-                      <span className="sr-only">Actions</span>
-                    </th>
+                    {revokeKeyAllowed && (
+                      <th className="px-4 py-3">
+                        <span className="sr-only">Actions</span>
+                      </th>
+                    )}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800">
@@ -472,22 +496,30 @@ export function KeysListClient({
                           {keyItem.revoked ? "Revoked" : "Active"}
                         </span>
                       </td>
-                      <td className="whitespace-nowrap px-4 py-3 text-right text-sm">
-                        {!keyItem.revoked && (
-                          <button
-                            type="button"
-                            onClick={() => setRevokeTarget(keyItem)}
-                            className="text-zinc-600 transition hover:text-red-700 dark:text-zinc-400 dark:hover:text-red-300"
-                          >
-                            Revoke
-                          </button>
-                        )}
-                      </td>
+                      {revokeKeyAllowed && (
+                        <td className="whitespace-nowrap px-4 py-3 text-right text-sm">
+                          {!keyItem.revoked && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setRevokeError(undefined);
+                                setRevokeTarget(keyItem);
+                              }}
+                              className="text-zinc-600 transition hover:text-red-700 dark:text-zinc-400 dark:hover:text-red-300"
+                            >
+                              Revoke
+                            </button>
+                          )}
+                        </td>
+                      )}
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
+            {revokeError && (
+              <p className="text-sm text-red-700 dark:text-red-300">{revokeError}</p>
+            )}
           </section>
         )}
       </div>
