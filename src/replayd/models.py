@@ -40,7 +40,7 @@ class Invitation(BaseModel):
     email: str
     role: str = Field(default="member", pattern="^(owner|admin|member|viewer)$")
     token: str
-    status: str = Field(pattern="^(pending|accepted|revoked)$")
+    status: str = Field(pattern="^(pending|accepted|revoked|declined)$")
     invited_by_user_id: str
     created_at: datetime
     accepted_at: datetime | None = None
@@ -52,6 +52,15 @@ class OrgMember(BaseModel):
     email: str
     role: str
     joined_at: datetime
+
+
+class IncomingInvitation(BaseModel):
+    id: str
+    organization_id: str
+    organization_name: str
+    role: str
+    invited_by: str | None = None
+    created_at: datetime
 
 
 class ProjectIngestKey(BaseModel):

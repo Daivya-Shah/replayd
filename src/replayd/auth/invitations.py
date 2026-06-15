@@ -34,6 +34,7 @@ def invitation_to_json(invitation: Invitation) -> dict[str, object]:
 
 def org_member_to_json(member: OrgMember) -> dict[str, object]:
     return {
+        "user_id": member.user_id,
         "email": member.email,
         "role": member.role,
         "joined_at": member.joined_at,

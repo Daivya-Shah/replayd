@@ -9,6 +9,8 @@ from replayd.models import (
 
     Invitation,
 
+    IncomingInvitation,
+
     Membership,
 
     Organization,
@@ -526,6 +528,28 @@ class Storage(ABC):
     async def accept_invitation(self, invitation: Invitation, user_id: str) -> None:
 
         """Accept an invitation, creating membership idempotently."""
+
+
+
+    @abstractmethod
+
+    async def decline_invitation(self, invitation_id: str) -> bool:
+
+        """Decline a pending invitation. Returns True if updated."""
+
+
+
+    @abstractmethod
+
+    async def list_incoming_invitations_for_email(
+
+        self,
+
+        email: str,
+
+    ) -> list[IncomingInvitation]:
+
+        """Return pending incoming invitations with org and inviter details."""
 
 
 

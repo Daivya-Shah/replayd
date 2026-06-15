@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import (
 from replayd.models import (
     Exchange,
     Invitation,
+    IncomingInvitation,
     Membership,
     Organization,
     OrgMember,
@@ -836,6 +837,48 @@ class SqlStorage(Storage):
                 invite_row.accepted_at = now.isoformat()
 
             await session.commit()
+
+    async def decline_invitation(self, invitation_id: str) -> bool:
+        session_factory = self._require_session_factory()
+        async with session_factory() as session:
+            row = await session.get(InvitationRow, invitation_id)
+            if row is None or row.status != "pending":
+                return False
+            row.status = "declined"
+            await session.commit()
+            return True
+
+    async def list_incoming_invitations_for_email(
+        self,
+        email: str,
+    ) -> list[IncomingInvitation]:
+        session_factory = self._require_session_factory()
+        now = datetime.now(UTC).isoformat()
+        async with session_factory() as session:
+            result = await session.execute(
+                select(InvitationRow, OrganizationRow, UserRow)
+                .join(OrganizationRow, OrganizationRow.id == InvitationRow.org_id)
+                .join(UserRow, UserRow.id == InvitationRow.invited_by_user_id)
+                .where(
+                    InvitationRow.email == email,
+                    InvitationRow.status == "pending",
+                    InvitationRow.expires_at > now,
+                )
+                .order_by(InvitationRow.created_at.asc(), InvitationRow.id.asc())
+            )
+            incoming: list[IncomingInvitation] = []
+            for invitation_row, organization_row, inviter_row in result.all():
+                incoming.append(
+                    IncomingInvitation(
+                        id=invitation_row.id,
+                        organization_id=organization_row.id,
+                        organization_name=organization_row.name,
+                        role=invitation_row.role,
+                        invited_by=inviter_row.email,
+                        created_at=datetime.fromisoformat(invitation_row.created_at),
+                    )
+                )
+            return incoming
 
     async def list_accessible_project_ids(self, user_id: str) -> list[str]:
         session_factory = self._require_session_factory()

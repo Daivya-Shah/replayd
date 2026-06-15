@@ -29,6 +29,12 @@ from replayd.auth.invitations import (
     org_member_to_json,
     revoke_invitation_for_principal,
 )
+from replayd.auth.incoming_invitations import (
+    accept_invitation_for_invitee,
+    decline_invitation_for_invitee,
+    incoming_invitation_to_json,
+    list_incoming_invitations_for_principal,
+)
 from replayd.auth.members import remove_member_for_principal
 from replayd.auth.projects import (
     create_project_for_principal,
@@ -487,6 +493,44 @@ def create_management_app(
             "items": [invitation_to_json(item) for item in items],
             "total": len(items),
         }
+
+    @app.get("/api/invitations/incoming")
+    async def list_incoming_invitations(request: Request) -> dict[str, object]:
+        store: Storage = request.app.state.storage
+        items = await list_incoming_invitations_for_principal(
+            store,
+            request.state.principal,
+        )
+        return {
+            "items": [incoming_invitation_to_json(item) for item in items],
+            "total": len(items),
+        }
+
+    @app.post("/api/invitations/{invitation_id}/accept", status_code=204)
+    async def accept_invitation_endpoint(
+        invitation_id: str,
+        request: Request,
+    ) -> Response:
+        store: Storage = request.app.state.storage
+        await accept_invitation_for_invitee(
+            store,
+            request.state.principal,
+            invitation_id,
+        )
+        return Response(status_code=204)
+
+    @app.post("/api/invitations/{invitation_id}/decline", status_code=204)
+    async def decline_invitation_endpoint(
+        invitation_id: str,
+        request: Request,
+    ) -> Response:
+        store: Storage = request.app.state.storage
+        await decline_invitation_for_invitee(
+            store,
+            request.state.principal,
+            invitation_id,
+        )
+        return Response(status_code=204)
 
     @app.delete("/api/invitations/{invitation_id}", status_code=204)
     async def revoke_invitation_endpoint(

@@ -94,25 +94,6 @@ def normalize_invitation_email(email: str) -> str:
     return email.strip().lower()
 
 
-async def accept_pending_invitations_for_user(
-    storage: Storage,
-    user: User,
-    *,
-    email_verified: bool,
-    login_email: str | None = None,
-) -> None:
-    if not email_verified:
-        return
-    email = login_email or user.email
-    if not email or email.endswith("@unknown.local"):
-        return
-
-    normalized_email = normalize_invitation_email(email)
-    invitations = await storage.list_pending_invitations_for_email(normalized_email)
-    for invitation in invitations:
-        await storage.accept_invitation(invitation, user.id)
-
-
 async def resolve_accessible_project_ids(
     storage: Storage,
     principal: Principal,

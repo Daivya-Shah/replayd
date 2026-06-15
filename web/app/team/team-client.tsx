@@ -9,15 +9,18 @@ import {
   InvitationConflictError,
   listInvitations,
   listMembers,
+  MemberRemoveError,
+  removeMember,
   revokeInvitation,
 } from "@/lib/api";
-import type { Invitation, OrgMember, OrgRole } from "@/lib/types";
+import type { Invitation, OrgMember, OrgRole, UserMeProfile } from "@/lib/types";
 
 type LoadState = "loading" | "ready" | "error";
 
 type TeamClientProps = {
   initialMembers: OrgMember[];
   initialInvitations: Invitation[];
+  initialCurrentUser: UserMeProfile | null;
   initialErrorUrl?: string;
   initialErrorMessage?: string;
 };
@@ -50,6 +53,103 @@ function roleBadgeClass(role: string): string {
     return "border-zinc-200 bg-zinc-50 text-zinc-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-400";
   }
   return "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900/50 dark:bg-emerald-950/40 dark:text-emerald-300";
+}
+
+function primaryOrgRole(currentUser: UserMeProfile | null): string | undefined {
+  if (!currentUser) {
+    return undefined;
+  }
+  return currentUser.memberships.find((membership) => membership.is_primary)?.role;
+}
+
+function countOwners(members: OrgMember[]): number {
+  return members.filter((member) => member.role === "owner").length;
+}
+
+function canRemoveMember(
+  member: OrgMember,
+  members: OrgMember[],
+  currentUser: UserMeProfile | null,
+): boolean {
+  const ownerCount = countOwners(members);
+  if (member.role === "owner" && ownerCount <= 1) {
+    return false;
+  }
+
+  if (!currentUser) {
+    return false;
+  }
+
+  const isSelf =
+    member.user_id === currentUser.user_id ||
+    member.email.toLowerCase() === currentUser.email.toLowerCase();
+  if (isSelf) {
+    return true;
+  }
+
+  const actorRole = primaryOrgRole(currentUser);
+  return actorRole === "owner" || actorRole === "admin";
+}
+
+function showMemberActionsColumn(
+  members: OrgMember[],
+  currentUser: UserMeProfile | null,
+): boolean {
+  return members.some((member) => canRemoveMember(member, members, currentUser));
+}
+
+function RemoveMemberConfirmModal({
+  member,
+  removing,
+  onCancel,
+  onConfirm,
+}: {
+  member: OrgMember;
+  removing: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="remove-member-title"
+        className="w-full max-w-md rounded-lg border border-zinc-200 bg-white shadow-xl dark:border-zinc-800 dark:bg-zinc-950"
+      >
+        <div className="space-y-3 px-6 py-5">
+          <h2 id="remove-member-title" className="text-lg font-semibold tracking-tight">
+            Remove member
+          </h2>
+          <p className="text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+            Remove{" "}
+            <span className="font-medium text-zinc-900 dark:text-zinc-100">
+              {member.email}
+            </span>{" "}
+            from the org?
+          </p>
+        </div>
+        <div className="flex justify-end gap-2 border-t border-zinc-200 px-6 py-4 dark:border-zinc-800">
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={removing}
+            className="inline-flex h-9 items-center rounded-md border border-zinc-200 bg-white px-4 text-sm font-medium text-zinc-900 transition hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:bg-zinc-800"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={removing}
+            className="inline-flex h-9 items-center rounded-md border border-red-200 bg-red-50 px-4 text-sm font-medium text-red-800 transition hover:bg-red-100 disabled:opacity-50 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300 dark:hover:bg-red-950/60"
+          >
+            {removing ? "Removing..." : "Remove member"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function RevokeConfirmModal({
@@ -109,11 +209,13 @@ function RevokeConfirmModal({
 export function TeamClient({
   initialMembers,
   initialInvitations,
+  initialCurrentUser,
   initialErrorUrl,
   initialErrorMessage,
 }: TeamClientProps) {
   const [members, setMembers] = useState(initialMembers);
   const [invitations, setInvitations] = useState(initialInvitations);
+  const [currentUser] = useState(initialCurrentUser);
   const [state, setState] = useState<LoadState>(
     initialErrorUrl ? "error" : "ready",
   );
@@ -124,6 +226,11 @@ export function TeamClient({
   const [inviteError, setInviteError] = useState<string>();
   const [revokeTarget, setRevokeTarget] = useState<Invitation | null>(null);
   const [revoking, setRevoking] = useState(false);
+  const [removeTarget, setRemoveTarget] = useState<OrgMember | null>(null);
+  const [removing, setRemoving] = useState(false);
+  const [removeError, setRemoveError] = useState<string>();
+
+  const memberActionsVisible = showMemberActionsColumn(members, currentUser);
 
   const refreshTeam = useCallback(async () => {
     setState("loading");
@@ -192,8 +299,43 @@ export function TeamClient({
     }
   };
 
+  const handleRemoveMember = async () => {
+    if (!removeTarget) {
+      return;
+    }
+    setRemoving(true);
+    setRemoveError(undefined);
+    try {
+      await removeMember(removeTarget.user_id);
+      setRemoveTarget(null);
+      const membersData = await listMembers();
+      setMembers(membersData.items);
+      setState("ready");
+      setErrorMessage(undefined);
+    } catch (error) {
+      setRemoveTarget(null);
+      if (error instanceof MemberRemoveError) {
+        setRemoveError(error.message);
+      } else if (error instanceof ApiReachabilityError) {
+        setRemoveError(formatApiReachabilityMessage(error.url));
+      } else {
+        setRemoveError("Could not remove member.");
+      }
+    } finally {
+      setRemoving(false);
+    }
+  };
+
   return (
     <div className="min-h-full bg-zinc-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
+      {removeTarget && (
+        <RemoveMemberConfirmModal
+          member={removeTarget}
+          removing={removing}
+          onCancel={() => setRemoveTarget(null)}
+          onConfirm={() => void handleRemoveMember()}
+        />
+      )}
       {revokeTarget && (
         <RevokeConfirmModal
           invitation={revokeTarget}
@@ -255,12 +397,17 @@ export function TeamClient({
                         <th className="px-4 py-3">Email</th>
                         <th className="px-4 py-3">Role</th>
                         <th className="px-4 py-3">Joined</th>
+                        {memberActionsVisible && (
+                          <th className="px-4 py-3">
+                            <span className="sr-only">Actions</span>
+                          </th>
+                        )}
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800">
                       {members.map((member) => (
                         <tr
-                          key={`${member.email}-${member.joined_at}`}
+                          key={member.user_id}
                           className="transition hover:bg-zinc-50 dark:hover:bg-zinc-950/40"
                         >
                           <td className="px-4 py-3 text-sm text-zinc-900 dark:text-zinc-100">
@@ -276,11 +423,30 @@ export function TeamClient({
                           <td className="whitespace-nowrap px-4 py-3 text-sm text-zinc-600 dark:text-zinc-400">
                             {formatTime(member.joined_at)}
                           </td>
+                          {memberActionsVisible && (
+                            <td className="whitespace-nowrap px-4 py-3 text-right text-sm">
+                              {canRemoveMember(member, members, currentUser) ? (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setRemoveError(undefined);
+                                    setRemoveTarget(member);
+                                  }}
+                                  className="text-zinc-600 transition hover:text-red-700 dark:text-zinc-400 dark:hover:text-red-300"
+                                >
+                                  Remove
+                                </button>
+                              ) : null}
+                            </td>
+                          )}
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
+              )}
+              {removeError && (
+                <p className="text-sm text-red-700 dark:text-red-300">{removeError}</p>
               )}
             </section>
 

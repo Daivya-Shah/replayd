@@ -25,14 +25,13 @@ from replayd.auth.tokens import (
     tokens_match,
 )
 from replayd.auth.user_profile import (
-    login_email_for_invites,
     normalized_token_email,
     resolved_new_user_email,
     sync_user_profile_from_token,
 )
 from replayd.config import Settings
 from replayd.models import User
-from replayd.auth.tenancy import accept_pending_invitations_for_user, ensure_user_tenant
+from replayd.auth.tenancy import ensure_user_tenant
 from replayd.storage.base import Storage
 
 logger = logging.getLogger(__name__)
@@ -126,15 +125,6 @@ async def provision_user_principal(
             name=name,
             email_verified=email_verified,
         )
-        await accept_pending_invitations_for_user(
-            storage,
-            user,
-            email_verified=email_verified,
-            login_email=login_email_for_invites(
-                token_email=email,
-                user_email=user.email,
-            ),
-        )
         await ensure_user_tenant(storage, user)
         return Principal(
             kind="user",
@@ -151,15 +141,6 @@ async def provision_user_principal(
         created_at=datetime.now(UTC),
     )
     await storage.create_user(user)
-    await accept_pending_invitations_for_user(
-        storage,
-        user,
-        email_verified=email_verified,
-        login_email=login_email_for_invites(
-            token_email=email,
-            user_email=user.email,
-        ),
-    )
     await ensure_user_tenant(storage, user)
     return Principal(
         kind="user",

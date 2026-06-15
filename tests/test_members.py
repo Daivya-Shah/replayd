@@ -8,7 +8,11 @@ from pathlib import Path
 import pytest
 
 from replayd.storage.base import Storage
-from test_invitations import _provision_owner
+from test_invitations import (
+    _accept_incoming_invitation,
+    _add_org_member_before_login,
+    _provision_owner,
+)
 from test_oidc import (
     _generate_rsa_keypair,
     _management_client,
@@ -67,7 +71,9 @@ async def test_owner_removes_member(
                 email=invitee_email,
                 email_verified=True,
             )
-            await client.get("/api/runs", headers={"Authorization": f"Bearer {invitee_token}"})
+            invitee_headers = {"Authorization": f"Bearer {invitee_token}"}
+            await client.get("/api/runs", headers=invitee_headers)
+            await _accept_incoming_invitation(client, invitee_headers)
             invitee_user = await core_storage.get_user_by_subject(invitee_subject)
             assert invitee_user is not None
 
@@ -145,7 +151,7 @@ async def test_member_cannot_remove_others(
 
     owner_subject = f"perm-owner-{uuid.uuid4().hex[:8]}"
     owner_email = f"perm-owner-{uuid.uuid4().hex[:6]}@example.com"
-    owner_user_id, _ = await _provision_owner(
+    owner_user_id, org_id = await _provision_owner(
         core_storage,
         subject=owner_subject,
         email=owner_email,
@@ -157,23 +163,25 @@ async def test_member_cannot_remove_others(
         email_verified=True,
     )
     owner_headers = {"Authorization": f"Bearer {owner_token}"}
-    invitee_email = f"perm-member-{uuid.uuid4().hex[:6]}@example.com"
+    member_email = f"perm-member-{uuid.uuid4().hex[:6]}@example.com"
+    member_subject = f"perm-member-{uuid.uuid4().hex[:8]}"
+    await _add_org_member_before_login(
+        core_storage,
+        org_id=org_id,
+        subject=member_subject,
+        email=member_email,
+        role="member",
+    )
 
     async with app.router.lifespan_context(app):
         async with client:
-            await client.post(
-                "/api/invitations",
-                json={"email": invitee_email, "role": "member"},
-                headers=owner_headers,
-            )
-            invitee_subject = f"invitee-{uuid.uuid4().hex[:8]}"
-            invitee_token = _mint_jwt(
+            member_token = _mint_jwt(
                 private_key,
-                sub=invitee_subject,
-                email=invitee_email,
+                sub=member_subject,
+                email=member_email,
                 email_verified=True,
             )
-            member_headers = {"Authorization": f"Bearer {invitee_token}"}
+            member_headers = {"Authorization": f"Bearer {member_token}"}
             await client.get("/api/runs", headers=member_headers)
             response = await client.delete(
                 f"/api/members/{owner_user_id}",
@@ -248,13 +256,21 @@ async def test_non_last_owner_can_remove_themselves(
 
     owner_a_subject = f"co-owner-a-{uuid.uuid4().hex[:8]}"
     owner_a_email = f"co-owner-a-{uuid.uuid4().hex[:6]}@example.com"
-    owner_a_user_id, _ = await _provision_owner(
+    owner_a_user_id, org_id = await _provision_owner(
         core_storage,
         subject=owner_a_subject,
         email=owner_a_email,
     )
 
     owner_b_email = f"co-owner-b-{uuid.uuid4().hex[:6]}@example.com"
+    owner_b_subject = f"co-owner-b-{uuid.uuid4().hex[:8]}"
+    owner_b_user = await _add_org_member_before_login(
+        core_storage,
+        org_id=org_id,
+        subject=owner_b_subject,
+        email=owner_b_email,
+        role="owner",
+    )
     owner_a_token = _mint_jwt(
         private_key,
         sub=owner_a_subject,
@@ -265,12 +281,6 @@ async def test_non_last_owner_can_remove_themselves(
 
     async with app.router.lifespan_context(app):
         async with client:
-            await client.post(
-                "/api/invitations",
-                json={"email": owner_b_email, "role": "owner"},
-                headers=owner_a_headers,
-            )
-            owner_b_subject = f"co-owner-b-{uuid.uuid4().hex[:8]}"
             owner_b_token = _mint_jwt(
                 private_key,
                 sub=owner_b_subject,
@@ -279,8 +289,6 @@ async def test_non_last_owner_can_remove_themselves(
             )
             owner_b_headers = {"Authorization": f"Bearer {owner_b_token}"}
             await client.get("/api/runs", headers=owner_b_headers)
-            owner_b_user = await core_storage.get_user_by_subject(owner_b_subject)
-            assert owner_b_user is not None
 
             remove_resp = await client.delete(
                 f"/api/members/{owner_b_user.id}",
