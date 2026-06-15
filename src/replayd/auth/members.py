@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import HTTPException
 
 from replayd.auth.invitations import resolve_org_id_for_principal
+from replayd.auth.permissions import REMOVE_MEMBER, require_permission
 from replayd.auth.principal import Principal
 from replayd.storage.base import Storage
 
@@ -26,8 +27,13 @@ async def remove_member_for_principal(
         raise HTTPException(status_code=404, detail="member not found")
 
     is_self = target_user_id == principal.user_id
-    if not is_self and actor_membership.role not in {"owner", "admin"}:
-        raise HTTPException(status_code=403, detail="forbidden")
+    if not is_self:
+        await require_permission(storage, principal, org_id, REMOVE_MEMBER)
+        if (
+            target_membership.role == "owner"
+            and actor_membership.role == "admin"
+        ):
+            raise HTTPException(status_code=403, detail="forbidden")
 
     if target_membership.role == "owner":
         owner_count = await storage.count_owners(org_id)

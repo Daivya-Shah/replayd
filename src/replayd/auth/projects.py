@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 
 from fastapi import HTTPException
 
+from replayd.auth.permissions import CREATE_PROJECT, RENAME_PROJECT, require_permission
 from replayd.auth.principal import Principal
 from replayd.auth.scoping import project_id_in_read_scope, resolve_read_scope
 from replayd.auth.tenancy import DEFAULT_USER_PROJECT_SLUG, slugify_name
@@ -98,6 +99,7 @@ async def create_project_for_principal(
     name: str,
 ) -> Project:
     org_id = await resolve_primary_org_id(storage, principal)
+    await require_permission(storage, principal, org_id, CREATE_PROJECT)
     now = datetime.now(UTC)
     slug = await generate_unique_project_slug(storage, org_id, name)
     project = Project(
@@ -119,6 +121,7 @@ async def rename_project_for_principal(
     name: str,
 ) -> Project:
     project = await get_project_for_principal(storage, principal, project_id)
+    await require_permission(storage, principal, project.org_id, RENAME_PROJECT)
     slug = await generate_unique_project_slug(
         storage,
         project.org_id,

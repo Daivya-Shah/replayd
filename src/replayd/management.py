@@ -36,6 +36,7 @@ from replayd.auth.incoming_invitations import (
     list_incoming_invitations_for_principal,
 )
 from replayd.auth.members import remove_member_for_principal
+from replayd.auth.permissions import CREATE_KEY, REVOKE_KEY, require_permission
 from replayd.auth.projects import (
     create_project_for_principal,
     get_project_for_principal,
@@ -571,6 +572,15 @@ def create_management_app(
             request.state.principal,
             body.project_id,
         )
+        project = await store.get_project(project_id)
+        if project is None:
+            raise HTTPException(status_code=404, detail="project not found")
+        await require_permission(
+            store,
+            request.state.principal,
+            project.org_id,
+            CREATE_KEY,
+        )
         key_model, plaintext = await store.create_ingest_key(project_id, body.name)
         payload = _ingest_key_metadata_to_json(key_model)
         payload["token"] = plaintext
@@ -607,6 +617,15 @@ def create_management_app(
         scope = await resolve_read_scope(store, request.state.principal)
         if not project_id_in_read_scope(key.project_id, scope):
             raise HTTPException(status_code=404, detail="ingest key not found")
+        project = await store.get_project(key.project_id)
+        if project is None:
+            raise HTTPException(status_code=404, detail="ingest key not found")
+        await require_permission(
+            store,
+            request.state.principal,
+            project.org_id,
+            REVOKE_KEY,
+        )
         await store.revoke_ingest_key(key_id)
         return Response(status_code=204)
 

@@ -6,6 +6,7 @@ import re
 
 from fastapi import HTTPException
 
+from replayd.auth.permissions import INVITE, REVOKE_INVITATION, require_permission
 from replayd.auth.principal import Principal
 from replayd.auth.projects import resolve_primary_org_id
 from replayd.models import Invitation, OrgMember
@@ -77,6 +78,7 @@ async def create_invitation_for_principal(
     role: str | None,
 ) -> Invitation:
     org_id = await resolve_org_id_for_principal(storage, principal)
+    await require_permission(storage, principal, org_id, INVITE)
     assert principal.user_id is not None
     normalized_email = _validate_invitation_email(email)
     invite_role = role or "member"
@@ -114,6 +116,7 @@ async def revoke_invitation_for_principal(
     invitation_id: str,
 ) -> None:
     invitation = await get_invitation_for_principal(storage, principal, invitation_id)
+    await require_permission(storage, principal, invitation.org_id, REVOKE_INVITATION)
     if invitation.status != "pending":
         raise HTTPException(status_code=404, detail="invitation not found")
     revoked = await storage.revoke_invitation(invitation.id)
