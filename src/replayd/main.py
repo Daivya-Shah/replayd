@@ -15,6 +15,7 @@ from replayd.proxy import (
     forward_request,
     replay_request,
     resolve_branch_parent_run_id,
+    resolve_candidate_run_id,
     resolve_replay_run_id,
     resolve_run_id_from_request,
 )
@@ -117,6 +118,7 @@ def create_app(
                 extra={
                     "mode": "replay",
                     "replay_run_id": replay_run_id,
+                    "candidate_run_id": resolve_candidate_run_id(request, settings),
                     "method": request.method,
                     "path": request.url.path,
                 },

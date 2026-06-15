@@ -120,6 +120,15 @@ def resolve_run_id_from_request(request: Request, settings: Settings) -> str:
     return value or uuid.uuid4().hex
 
 
+def resolve_candidate_run_id(request: Request, settings: Settings) -> str | None:
+    """Return an explicit capture run id from RUN_ID_HEADER, or None if absent."""
+    header_name = settings.RUN_ID_HEADER
+    value = _header_value_from_scope(request.scope, header_name)
+    if value is not None:
+        return value
+    return _header_value_from_headers(request.headers, header_name)
+
+
 def _run_id_from_headers(headers: Mapping[str, str], header_name: str) -> str | None:
     return _header_value_from_headers(headers, header_name)
 
@@ -287,13 +296,14 @@ async def replay_request(
             content={"error": "replay requires storage"},
         )
 
-    run_id = resolve_replay_run_id(request, settings)
-    if run_id is None:
+    baseline_run_id = resolve_replay_run_id(request, settings)
+    if baseline_run_id is None:
         return JSONResponse(
             status_code=400,
             content={"error": "replay header missing or empty"},
         )
 
+    candidate_run_id = resolve_candidate_run_id(request, settings)
     body = await request.body()
     body_hash = request_body_hash(body)
 
@@ -302,16 +312,17 @@ async def replay_request(
         extra={
             "method": request.method,
             "path": request.url.path,
-            "run_id": run_id,
+            "run_id": baseline_run_id,
+            "candidate_run_id": candidate_run_id,
             "request_body_hash": body_hash,
         },
     )
 
-    steps = await storage.get_run(run_id)
+    steps = await storage.get_run(baseline_run_id)
     if not steps:
         return JSONResponse(
             status_code=404,
-            content={"error": "run_not_found", "run_id": run_id},
+            content={"error": "run_not_found", "run_id": baseline_run_id},
         )
 
     matched = next(
@@ -324,7 +335,7 @@ async def replay_request(
             content={
                 "error": "replay_divergence",
                 "detail": "no recorded response matches this request",
-                "run_id": run_id,
+                "run_id": baseline_run_id,
                 "request_body_hash": body_hash,
             },
         )
@@ -333,6 +344,31 @@ async def replay_request(
         response_body = b""
     else:
         response_body = await storage.get_blob(matched.response_body_hash)
+
+    if candidate_run_id is not None:
+        capture_project_id = await resolve_capture_project_id(request, storage, settings)
+        if isinstance(capture_project_id, Response):
+            return capture_project_id
+
+        started_at = datetime.now(UTC)
+        ended_at = datetime.now(UTC)
+        try:
+            await persist_exchange(
+                storage,
+                request=request,
+                request_body=body,
+                started_at=started_at,
+                ended_at=ended_at,
+                response_status=matched.response_status,
+                response_headers=matched.response_headers,
+                response_body=response_body,
+                run_id=candidate_run_id,
+                parent_run_id=baseline_run_id,
+                origin="replayed",
+                project_id=capture_project_id,
+            )
+        except Exception:
+            logger.exception("failed to capture replay exchange")
 
     return Response(
         content=response_body,
