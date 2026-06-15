@@ -290,7 +290,9 @@ def build_client(control_plane_url: str, api_token: str | None) -> httpx.Client:
 
 
 def run_cli(argv: list[str] | None = None) -> int:
-    cli_argv, agent_command = split_cli_and_agent_argv(argv or [])
+    if argv is None:
+        argv = sys.argv[1:]
+    cli_argv, agent_command = split_cli_and_agent_argv(argv)
 
     parser = argparse.ArgumentParser(
         prog="replayd-test",
@@ -373,8 +375,8 @@ def run_cli(argv: list[str] | None = None) -> int:
         )
 
 
-def main() -> None:
-    raise SystemExit(run_cli())
+def main(argv: list[str] | None = None) -> None:
+    raise SystemExit(run_cli(argv))
 
 
 if __name__ == "__main__":

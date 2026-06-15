@@ -15,6 +15,7 @@ from replayd.cli.test_cmd import (
     EXIT_ERROR,
     EXIT_FAIL,
     EXIT_PASS,
+    main,
     process_run_response,
     run_cli,
 )
@@ -275,3 +276,86 @@ def test_cli_rejects_candidate_and_agent_together() -> None:
         )
         == EXIT_ERROR
     )
+
+
+def test_main_entry_path_parses_run_with_agent_command(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Shell invokes main() -> run_cli(None) -> sys.argv[1:]; agent argv follows '--'."""
+    argv = [
+        "run",
+        "test-id",
+        "--",
+        r".venv\Scripts\python.exe",
+        r"scripts\demo_agent.py",
+    ]
+    monkeypatch.setattr(sys, "argv", ["replayd-test", *argv])
+
+    class _FakeClient:
+        def __enter__(self) -> "_FakeClient":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+    captured: dict[str, object] = {}
+
+    def _fake_run_with_agent(
+        client: object,
+        test_id: str,
+        agent_command: list[str],
+        **kwargs: object,
+    ) -> int:
+        captured["test_id"] = test_id
+        captured["agent_command"] = agent_command
+        return EXIT_PASS
+
+    monkeypatch.setattr("replayd.cli.test_cmd.build_client", lambda *args, **kwargs: _FakeClient())
+    monkeypatch.setattr("replayd.cli.test_cmd.run_with_agent", _fake_run_with_agent)
+
+    with pytest.raises(SystemExit) as exc_info:
+        main()
+
+    assert exc_info.value.code == EXIT_PASS
+    assert captured["test_id"] == "test-id"
+    assert captured["agent_command"] == [
+        r".venv\Scripts\python.exe",
+        r"scripts\demo_agent.py",
+    ]
+
+
+def test_main_accepts_explicit_argv_without_program_name(monkeypatch: pytest.MonkeyPatch) -> None:
+    argv = [
+        "run",
+        "explicit-test-id",
+        "--",
+        sys.executable,
+        "scripts/demo_agent.py",
+    ]
+
+    class _FakeClient:
+        def __enter__(self) -> "_FakeClient":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+    captured: dict[str, object] = {}
+
+    def _fake_run_with_agent(
+        client: object,
+        test_id: str,
+        agent_command: list[str],
+        **kwargs: object,
+    ) -> int:
+        captured["test_id"] = test_id
+        captured["agent_command"] = agent_command
+        return EXIT_PASS
+
+    monkeypatch.setattr("replayd.cli.test_cmd.build_client", lambda *args, **kwargs: _FakeClient())
+    monkeypatch.setattr("replayd.cli.test_cmd.run_with_agent", _fake_run_with_agent)
+
+    with pytest.raises(SystemExit) as exc_info:
+        main(argv)
+
+    assert exc_info.value.code == EXIT_PASS
+    assert captured["test_id"] == "explicit-test-id"
+    assert captured["agent_command"] == [sys.executable, "scripts/demo_agent.py"]
