@@ -11,35 +11,40 @@ load_dotenv()
 
 from openai import APIError, APIStatusError, OpenAI
 
-from agent_steps import proxy_default_headers, run_demo_chat_steps
-
-PROXY_BASE_URL = "http://127.0.0.1:8787/v1"
-REPLAY_HEADER = "x-replayd-replay"
+from agent_steps import (
+    REPLAYD_REPLAY_RUN_ID_ENV,
+    REPLAY_HEADER,
+    proxy_default_headers,
+    resolve_proxy_base_url,
+    run_demo_chat_steps,
+)
 
 
 def main() -> None:
-    run_id = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("REPLAYD_RUN_ID")
-    if not run_id:
+    replay_run_id = os.environ.get(REPLAYD_REPLAY_RUN_ID_ENV)
+    if not replay_run_id and len(sys.argv) > 1:
+        replay_run_id = sys.argv[1]
+    if not replay_run_id:
         print(
-            "Error: provide a run id as a CLI argument or REPLAYD_RUN_ID env var.",
+            "Error: provide a run id as a CLI argument or set REPLAYD_REPLAY_RUN_ID.",
             file=sys.stderr,
         )
         sys.exit(1)
 
-    # A dummy API key is fine: replay mode matches request bodies against storage
-    # and returns recorded responses without calling the upstream provider.
     api_key = os.environ.get("OPENAI_API_KEY", "replay-dummy-key")
+    header_overrides = (
+        {} if os.environ.get(REPLAYD_REPLAY_RUN_ID_ENV) else {REPLAY_HEADER: replay_run_id}
+    )
     client = OpenAI(
         api_key=api_key,
-        base_url=PROXY_BASE_URL,
-        default_headers=proxy_default_headers(**{REPLAY_HEADER: run_id}),
+        base_url=resolve_proxy_base_url(),
+        default_headers=proxy_default_headers(**header_overrides),
     )
 
-    print(f"Replaying run: {run_id}")
+    print(f"Replaying run: {replay_run_id}")
 
     try:
-        replay_headers = proxy_default_headers(**{REPLAY_HEADER: run_id})
-        replies = run_demo_chat_steps(client, extra_headers=replay_headers)
+        replies = run_demo_chat_steps(client)
         for step, reply in enumerate(replies, start=1):
             print(f"Step {step}: {reply.strip()}")
     except APIStatusError as exc:

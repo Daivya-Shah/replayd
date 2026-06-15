@@ -9,7 +9,15 @@ DEMO_MODEL = "gpt-4o-mini"
 DEMO_MAX_TOKENS = 40
 
 REPLAYD_INGEST_KEY_ENV = "REPLAYD_INGEST_KEY"
+REPLAYD_BASE_URL_ENV = "REPLAYD_BASE_URL"
+REPLAYD_PROXY_URL_ENV = "REPLAYD_PROXY_URL"
+REPLAYD_REPLAY_RUN_ID_ENV = "REPLAYD_REPLAY_RUN_ID"
+REPLAYD_RUN_ID_ENV = "REPLAYD_RUN_ID"
+
 INGEST_KEY_HEADER = "x-replayd-key"
+REPLAY_HEADER = "x-replayd-replay"
+RUN_ID_HEADER = "x-replayd-run-id"
+DEFAULT_PROXY_BASE_URL = "http://localhost:8787/v1"
 
 DEMO_STEP_PROMPTS = [
     "You are planning a short trip. In one sentence, name a city to visit.",
@@ -22,13 +30,35 @@ BRANCH_STEP_1_PROMPT = (
 )
 
 
-def proxy_default_headers(**headers: str) -> dict[str, str]:
-    """Build proxy control headers, optionally including REPLAYD_INGEST_KEY from the environment."""
-    merged = dict(headers)
+def resolve_proxy_base_url() -> str:
+    for env_name in (REPLAYD_BASE_URL_ENV, REPLAYD_PROXY_URL_ENV):
+        value = os.environ.get(env_name)
+        if value:
+            normalized = value.rstrip("/")
+            if not normalized.endswith("/v1"):
+                return f"{normalized}/v1"
+            return normalized
+    return DEFAULT_PROXY_BASE_URL
+
+
+def proxy_default_headers(**overrides: str) -> dict[str, str]:
+    """Build proxy control headers from environment and optional overrides."""
+    headers: dict[str, str] = {}
+
+    replay_run_id = os.environ.get(REPLAYD_REPLAY_RUN_ID_ENV)
+    if replay_run_id:
+        headers[REPLAY_HEADER] = replay_run_id
+
+    run_id = os.environ.get(REPLAYD_RUN_ID_ENV)
+    if run_id:
+        headers[RUN_ID_HEADER] = run_id
+
     ingest_key = os.environ.get(REPLAYD_INGEST_KEY_ENV)
     if ingest_key:
-        merged[INGEST_KEY_HEADER] = ingest_key
-    return merged
+        headers[INGEST_KEY_HEADER] = ingest_key
+
+    headers.update(overrides)
+    return headers
 
 
 def demo_chat_steps() -> list[dict[str, Any]]:

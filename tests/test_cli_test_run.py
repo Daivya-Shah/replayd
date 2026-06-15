@@ -1,6 +1,7 @@
 """Tests for the replayd-test CLI."""
 
 import io
+import sys
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -257,3 +258,20 @@ async def test_cli_run_missing_auth_exits_two(
 
 def test_cli_usage_error_exits_two() -> None:
     assert run_cli(["run", "test-id"]) == EXIT_ERROR
+
+
+def test_cli_rejects_candidate_and_agent_together() -> None:
+    assert (
+        run_cli(
+            [
+                "run",
+                "test-id",
+                "--candidate",
+                "candidate-run",
+                "--",
+                sys.executable,
+                "agent.py",
+            ],
+        )
+        == EXIT_ERROR
+    )
