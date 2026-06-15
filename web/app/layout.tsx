@@ -4,8 +4,10 @@ import { Geist, Geist_Mono } from "next/font/google";
 import { AppNav } from "@/components/app-nav";
 import { ActiveProjectProvider } from "@/components/active-project-provider";
 import { AuthSessionProvider } from "@/components/auth-session-provider";
+import { IncomingInvitationsBanner } from "@/components/incoming-invitations-banner";
 import { OidcAuthGate } from "@/components/oidc-auth-gate";
 import { resolveActiveProjectContext } from "@/lib/active-project";
+import { resolveIncomingInvitations } from "@/lib/incoming-invitations";
 
 import "./globals.css";
 
@@ -30,6 +32,7 @@ export default async function RootLayout({
   children: React.ReactNode;
 }>) {
   const projectContext = await resolveActiveProjectContext();
+  const incomingInvitations = await resolveIncomingInvitations();
 
   return (
     <html
@@ -40,7 +43,10 @@ export default async function RootLayout({
         <AuthSessionProvider>
           <ActiveProjectProvider value={projectContext}>
             <AppNav />
-            <OidcAuthGate>{children}</OidcAuthGate>
+            <OidcAuthGate>
+              <IncomingInvitationsBanner initialInvitations={incomingInvitations} />
+              {children}
+            </OidcAuthGate>
           </ActiveProjectProvider>
         </AuthSessionProvider>
       </body>
