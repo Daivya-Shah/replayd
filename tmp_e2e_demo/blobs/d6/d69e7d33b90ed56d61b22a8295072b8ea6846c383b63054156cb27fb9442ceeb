@@ -1,0 +1,1 @@
+{"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "Now in one sentence, give a brief concluding tip for the trip."}], "max_tokens": 40}
