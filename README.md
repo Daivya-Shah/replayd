@@ -1,4 +1,4 @@
-# replayd
+# Replayd
 
 replayd is a transparent recording proxy for LLM agents. Point your agent at it instead of the provider API and every request/response is captured losslessly. Use the dashboard to inspect runs, deterministically replay them, branch from a divergence point, and regression-test behavior over time. Bring-your-own-key: your agent sends its own provider API key on each request; replayd forwards it upstream and **never stores or bills for model usage** (sensitive headers are redacted from persisted records).
 
