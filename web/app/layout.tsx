@@ -24,7 +24,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "replayd",
+  title: "Replayd",
   description: "Record and inspect LLM agent runs",
 };
 

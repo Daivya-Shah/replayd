@@ -210,7 +210,7 @@ def create_management_app(
             if owns_storage and app.state.storage is not None:
                 await app.state.storage.aclose()
 
-    app = FastAPI(title="replayd-management", lifespan=lifespan)
+    app = FastAPI(title="Replayd Management", lifespan=lifespan)
     app.add_middleware(
         ApiTokenMiddleware,
         settings=resolved_settings,

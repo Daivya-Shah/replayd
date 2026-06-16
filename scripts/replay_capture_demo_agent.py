@@ -1,13 +1,17 @@
-"""CI replay-capture driver: same steps as demo_agent with byte-stable JSON encoding."""
+"""CI replay-capture driver: same steps as demo_agent with OpenAI SDK JSON encoding."""
 
 from __future__ import annotations
 
-import json
 import sys
 
 import httpx
 
-from agent_steps import demo_chat_steps, proxy_default_headers, resolve_proxy_base_url
+from agent_steps import (
+    demo_chat_steps,
+    openai_chat_request_body,
+    proxy_default_headers,
+    resolve_proxy_base_url,
+)
 
 
 def main() -> None:
@@ -18,7 +22,7 @@ def main() -> None:
     for step in demo_chat_steps():
         response = httpx.post(
             f"{proxy_root}/v1/chat/completions",
-            content=json.dumps(step).encode(),
+            content=openai_chat_request_body(step),
             headers=headers,
             timeout=30.0,
         )

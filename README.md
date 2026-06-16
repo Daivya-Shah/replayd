@@ -1,6 +1,6 @@
 # Replayd
 
-replayd is a transparent recording proxy for LLM agents. Point your agent at it instead of the provider API and every request/response is captured losslessly. Use the dashboard to inspect runs, deterministically replay them, branch from a divergence point, and regression-test behavior over time. Bring-your-own-key: your agent sends its own provider API key on each request; replayd forwards it upstream and **never stores or bills for model usage** (sensitive headers are redacted from persisted records).
+Replayd is a transparent recording proxy for LLM agents. Point your agent at it instead of the provider API and every request/response is captured losslessly. Use the dashboard to inspect runs, deterministically replay them, branch from a divergence point, and regression-test behavior over time. Bring-your-own-key: your agent sends its own provider API key on each request; Replayd forwards it upstream and **never stores or bills for model usage** (sensitive headers are redacted from persisted records).
 
 ## Quickstart (Docker)
 
@@ -18,7 +18,7 @@ docker compose up --build
 | Logto (OIDC / auth API) | http://localhost:3001 |
 | Logto Admin Console | http://localhost:3002 |
 
-Set your OpenAI client `base_url` to `http://localhost:8787/v1` and send requests with your usual `OPENAI_API_KEY`. replayd records automatically.
+Set your OpenAI client `base_url` to `http://localhost:8787/v1` and send requests with your usual `OPENAI_API_KEY`. Replayd records automatically.
 
 **Storage in Docker:** the relational index lives in **Postgres 16** (`DATABASE_URL=postgresql+asyncpg://replayd:replayd@postgres:5432/replayd` by default). Request/response bodies are stored in **MinIO** (S3-compatible) via `BLOB_STORAGE_BACKEND=s3` — the `minio` service on port 9000 (console on 9001). A one-shot **`migrate`** service runs `replayd-migrate` after Postgres is healthy and before the proxy and control-plane start (`RUN_MIGRATIONS_ON_STARTUP=false`). `S3BlobStore.init()` creates the `replayd` bucket if needed.
 
@@ -31,7 +31,7 @@ Override Postgres, MinIO, Logto, or blob settings via environment variables — 
 After `docker compose up --build`:
 
 1. Open the **Logto Admin Console** at http://localhost:3002 and create the initial admin account.
-2. Create an **API Resource** for the replayd control-plane API. Set its **API identifier** to `http://localhost:8788` (must match `OIDC_AUDIENCE` / `AUTH_OIDC_AUDIENCE`).
+2. Create an **API Resource** for the Replayd control-plane API. Set its **API identifier** to `http://localhost:8788` (must match `OIDC_AUDIENCE` / `AUTH_OIDC_AUDIENCE`).
 3. Create a **Traditional Web Application** for the dashboard:
    - **Redirect URI:** `http://localhost:3000/api/auth/callback/oidc`
    - **Post sign-out redirect URI:** `http://localhost:3000`
@@ -123,7 +123,7 @@ x-replayd-run-id: <new-branch-run-id>
 
 ## Bring your own key
 
-replayd does not hold provider credentials. Your agent (or SDK) attaches its API key to each request; the proxy forwards it to `UPSTREAM_BASE_URL` and redacts it from stored capture metadata. You are always billed by your provider, not by replayd.
+Replayd does not hold provider credentials. Your agent (or SDK) attaches its API key to each request; the proxy forwards it to `UPSTREAM_BASE_URL` and redacts it from stored capture metadata. You are always billed by your provider, not by Replayd.
 
 ## Development (without Docker)
 
@@ -139,7 +139,7 @@ source .venv/bin/activate
 pip install -e ".[dev]"
 ```
 
-Copy [`.env.example`](.env.example) to `.env` if you want local overrides. **Without `DATABASE_URL`**, replayd uses **SQLite** at `{STORAGE_DIR}/replayd.db`. **Without `BLOB_STORAGE_BACKEND=s3`**, blobs stay on the **local filesystem** at `{STORAGE_DIR}/blobs/` (default for non-Docker dev).
+Copy [`.env.example`](.env.example) to `.env` if you want local overrides. **Without `DATABASE_URL`**, Replayd uses **SQLite** at `{STORAGE_DIR}/replayd.db`. **Without `BLOB_STORAGE_BACKEND=s3`**, blobs stay on the **local filesystem** at `{STORAGE_DIR}/blobs/` (default for non-Docker dev).
 
 Start the data plane and control plane in separate terminals:
 

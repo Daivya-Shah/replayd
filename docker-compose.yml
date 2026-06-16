@@ -144,8 +144,8 @@ services:
       OIDC_JWKS_URL: ${OIDC_JWKS_URL:-http://logto:3001/oidc/jwks}
       OIDC_AUDIENCE: ${OIDC_AUDIENCE:-http://localhost:8788}
       OIDC_ALGORITHMS: ${OIDC_ALGORITHMS:-ES384,RS256}
-      # Set for any non-local deployment so recorded prompts/responses are not public.
-      # REPLAYD_API_TOKEN: change-me-to-a-long-random-secret
+      # Service token for replayd-test CLI / CI gate (Bearer auth alongside OIDC).
+      REPLAYD_API_TOKEN: ${REPLAYD_API_TOKEN:-}
     depends_on:
       postgres:
         condition: service_healthy

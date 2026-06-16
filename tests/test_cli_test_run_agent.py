@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import os
 import socket
 import sys
@@ -42,9 +41,9 @@ def _find_free_port() -> int:
 
 def _demo_request_bodies() -> list[bytes]:
     sys.path.insert(0, str(SCRIPTS_DIR))
-    from agent_steps import demo_chat_steps
+    from agent_steps import demo_chat_request_bodies
 
-    return [json.dumps(step).encode() for step in demo_chat_steps()]
+    return demo_chat_request_bodies()
 
 
 class _UvicornThread:
@@ -149,6 +148,7 @@ async def agent_e2e_stack(tmp_path: Path) -> Iterator[dict[str, object]]:
     mgmt_server.start()
 
     agent_script = SCRIPTS_DIR / "replay_capture_demo_agent.py"
+    demo_agent_script = SCRIPTS_DIR / "demo_agent.py"
     diverging_script = SCRIPTS_DIR / "diverging_demo_agent.py"
 
     try:
@@ -157,6 +157,7 @@ async def agent_e2e_stack(tmp_path: Path) -> Iterator[dict[str, object]]:
             "proxy_url": f"http://127.0.0.1:{proxy_port}/v1",
             "control_plane_url": f"http://127.0.0.1:{mgmt_port}",
             "agent_command": [sys.executable, str(agent_script)],
+            "demo_agent_command": [sys.executable, str(demo_agent_script)],
             "diverging_agent_command": [sys.executable, str(diverging_script)],
             "scripts_dir": str(SCRIPTS_DIR),
             "storage": storage,
@@ -203,6 +204,16 @@ def test_cli_run_with_agent_replay_capture_exits_zero(
     exit_code = _run_cli_with_stack(
         agent_e2e_stack,
         agent_e2e_stack["agent_command"],  # type: ignore[arg-type]
+    )
+    assert exit_code == EXIT_PASS
+
+
+def test_cli_run_with_demo_agent_replay_capture_exits_zero(
+    agent_e2e_stack: dict[str, object],
+) -> None:
+    exit_code = _run_cli_with_stack(
+        agent_e2e_stack,
+        agent_e2e_stack["demo_agent_command"],  # type: ignore[arg-type]
     )
     assert exit_code == EXIT_PASS
 

@@ -1,11 +1,11 @@
 ---
-description: Core architecture and standards for replayd
+description: Core architecture and standards for Replayd
 alwaysApply: true
 ---
 
 STANDING RULE: Whenever a dependency is added or changed in `pyproject.toml`, run `pip install -e .` in your local `.venv` before testing. Cursor's environment differs from the developer's venv.
 
-PROJECT: "replayd" — a deterministic record-and-replay reliability layer for LLM agents, built for production deployment and meant to scale to a large company.
+PROJECT: "Replayd" — a deterministic record-and-replay reliability layer for LLM agents, built for production deployment and meant to scale to a large company.
 
 WHAT IT IS: A transparent reverse proxy that sits between an AI agent and an OpenAI/Anthropic-compatible LLM API. It captures every step of an agent's run and lets users replay it. This is the foundation for later step-through debugging and drift-detection features.
 
@@ -36,7 +36,7 @@ ARCHITECTURE:
 - src/ layout, package name `replayd`.
 - TWO PLANES: DATA PLANE = the transparent proxy (catch-all) that customers point agents at, on LISTEN_PORT. CONTROL PLANE = a separate FastAPI app (management API + later the dashboard) on MGMT_PORT, which only READS from storage. They are separate apps on separate ports sharing the same STORAGE_DIR. SQLite runs in WAL mode so the proxy (writer) and management API (reader) can access the DB concurrently across processes.
 - The proxy must be TRANSPARENT: an agent pointed at it behaves identically to talking to the upstream API directly, including streaming. Never alter request or response semantics.
-- BRING-YOUR-OWN-KEY: customers send their own provider API key through the proxy; replayd never holds or bills for model usage.
+- BRING-YOUR-OWN-KEY: customers send their own provider API key through the proxy; Replayd never holds or bills for model usage.
 - OPEN-CORE: the proxy + capture + replay engine must be self-hostable with no external dependencies beyond the provider API and local storage, so security-conscious teams can run it entirely in their own environment.
 
 REPLAY MODEL (precise):

@@ -1,4 +1,4 @@
-"""Live smoke test: send a real OpenAI request through the running replayd proxy."""
+"""Live smoke test: send a real OpenAI request through the running Replayd proxy."""
 
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ def main() -> None:
     try:
         response = client.chat.completions.create(
             model="gpt-4o-mini",
-            messages=[{"role": "user", "content": "Reply with exactly: replayd works"}],
+            messages=[{"role": "user", "content": "Reply with exactly: Replayd works"}],
             max_tokens=20,
         )
     except APIStatusError as exc:

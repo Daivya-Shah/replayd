@@ -75,7 +75,7 @@ def create_app(
                 if owns_storage and app.state.storage is not None:
                     await app.state.storage.aclose()
 
-    app = FastAPI(title="replayd", version=__version__, lifespan=lifespan)
+    app = FastAPI(title="Replayd", version=__version__, lifespan=lifespan)
 
     @app.get("/health")
     async def health() -> dict[str, str]:

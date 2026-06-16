@@ -61,6 +61,28 @@ def proxy_default_headers(**overrides: str) -> dict[str, str]:
     return headers
 
 
+def openai_chat_request_body(step: dict[str, Any]) -> bytes:
+    """Serialize a chat step the same way the OpenAI Python SDK does."""
+    from openai._utils import maybe_transform
+    from openai._utils._json import openapi_dumps
+    from openai.types.chat import completion_create_params
+
+    payload = maybe_transform(
+        {
+            "messages": step["messages"],
+            "model": step["model"],
+            "max_tokens": step["max_tokens"],
+        },
+        completion_create_params.CompletionCreateParams,
+    )
+    return openapi_dumps(payload)
+
+
+def demo_chat_request_bodies() -> list[bytes]:
+    """Request bodies for demo steps using OpenAI SDK JSON encoding."""
+    return [openai_chat_request_body(step) for step in demo_chat_steps()]
+
+
 def demo_chat_steps() -> list[dict[str, Any]]:
     return [
         {

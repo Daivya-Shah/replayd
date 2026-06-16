@@ -1,4 +1,4 @@
-"""Branch replay-then-live demo against a parent run through the replayd proxy."""
+"""Branch replay-then-live demo against a parent run through the Replayd proxy."""
 
 from __future__ import annotations
 

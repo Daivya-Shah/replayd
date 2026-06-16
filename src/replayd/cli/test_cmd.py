@@ -296,7 +296,7 @@ def run_cli(argv: list[str] | None = None) -> int:
 
     parser = argparse.ArgumentParser(
         prog="replayd-test",
-        description="Run saved regression tests against the replayd control plane.",
+        description="Run saved regression tests against the Replayd control plane.",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 

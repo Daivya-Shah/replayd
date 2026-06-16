@@ -39,7 +39,7 @@ export function AppNav() {
           href="/"
           className="text-sm font-semibold tracking-tight text-zinc-900 dark:text-zinc-100"
         >
-          replayd
+          Replayd
         </Link>
         <div className="flex flex-1 items-center gap-1">
           {links.map((link) => {

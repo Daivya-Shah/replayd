@@ -106,7 +106,7 @@ function UsageSnippet({
         {snippet}
       </pre>
       <p className="text-xs leading-5 text-zinc-500 dark:text-zinc-500">
-        Point your OpenAI or Anthropic client at the replayd proxy base URL and send the ingest
+        Point your OpenAI or Anthropic client at the Replayd proxy base URL and send the ingest
         key on every request via the <span className="font-mono">x-replayd-key</span> header.
       </p>
     </div>

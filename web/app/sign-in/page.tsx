@@ -23,7 +23,7 @@ export default function SignInPage() {
             Sign in
           </h1>
           <p className="text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-            Continue to the replayd dashboard using your OIDC identity provider.
+            Continue to the Replayd dashboard using your OIDC identity provider.
           </p>
         </div>
         <button

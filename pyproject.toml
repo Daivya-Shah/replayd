@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "replayd"
 version = "0.0.1"
-description = "Deterministic record-and-replay reliability layer for LLM agents"
+description = "Replayd — deterministic record-and-replay reliability layer for LLM agents"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [

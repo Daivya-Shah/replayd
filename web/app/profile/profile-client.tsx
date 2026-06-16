@@ -189,7 +189,7 @@ export function ProfileClient({
           <div className="space-y-2">
             <h1 className="text-2xl font-semibold tracking-tight">Account</h1>
             <p className="max-w-xl text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-              Your replayd identity and organization memberships.
+              Your Replayd identity and organization memberships.
             </p>
           </div>
           {oidcEnabled && session && (

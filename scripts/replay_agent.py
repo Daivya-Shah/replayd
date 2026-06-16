@@ -1,4 +1,4 @@
-"""Replay a recorded run through the replayd proxy in sandbox mode."""
+"""Replay a recorded run through the Replayd proxy in sandbox mode."""
 
 from __future__ import annotations
 
