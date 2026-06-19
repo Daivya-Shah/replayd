@@ -1,10 +1,10 @@
 # Replayd
 
-Replayd is a record-and-replay layer for LLM agents. Point your agent at it instead of the provider API, and it forwards traffic like normal while saving every request and response. Later you can replay a run without calling the model, branch from an earlier recording, or compare two runs to catch regressions.
+Replayd is a recording proxy for LLM agents. Point your agent at it instead of the provider API and every request/response gets captured losslessly.
 
 You keep your own API keys. Replayd only forwards traffic on your behalf. The whole stack runs on your infrastructure if you want it to.
 
-## Why we built this
+## Why I built this
 
 Debugging agent runs is painful. Logs usually skip full request and response bodies. Re-running the same task often takes a different path. And there is no standard way to say "this run should behave like that one."
 
