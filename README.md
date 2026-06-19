@@ -1,36 +1,55 @@
 # Replayd
 
-Replayd is a recording proxy for LLM agents. Point your agent at it instead of the provider API and every request/response gets captured losslessly. Use the dashboard to inspect runs, replay them offline, branch from a divergence point, and regression-test behavior over time.
+Replayd is a record-and-replay layer for LLM agents. Point your agent at the proxy instead of the provider API, and every request/response pair gets captured losslessly. Later you can replay a run without calling the model, branch from a recorded trajectory, or run regression tests to catch drift.
 
-Your agent keeps sending its own provider API key. Replayd forwards it upstream and never stores or bills for model usage. Sensitive headers are redacted from what gets persisted.
+Bring your own API key. Replayd forwards it to the upstream provider and never stores or bills for model usage. The proxy is designed to be transparent: streaming works, headers pass through, and agents behave the same as they would talking to OpenAI (or any compatible API) directly.
 
-## Quickstart with Docker
+## How it works
+
+Replayd runs two services that share storage:
+
+| Service | Port | What it does |
+|---------|------|--------------|
+| **Proxy** (data plane) | 8787 | Transparent catch-all proxy. Captures traffic. Handles replay and branch modes. |
+| **Control plane** | 8788 | Read-only management API. Powers the dashboard and the regression CLI. |
+
+Captured request and response bodies go into a content-addressed blob store (local filesystem or S3). Metadata (runs, exchanges, tests, org/project info) lives in a relational database (SQLite locally, Postgres in production).
+
+```
+Agent  -->  Replayd proxy (:8787)  -->  OpenAI / Anthropic / etc.
+                  |
+                  v
+            SQLite or Postgres + blob storage
+                  ^
+                  |
+Dashboard (:3000) -->  Control plane (:8788)
+```
+
+## Quick start with Docker
 
 You need [Docker Desktop](https://www.docker.com/products/docker-desktop/) (or Docker Engine + Compose).
+
+The fastest way to run the full stack (Postgres, MinIO, Logto OIDC, proxy, control plane, dashboard):
 
 ```bash
 docker compose up --build
 ```
 
-Once everything is up:
+Once everything is healthy:
 
-| Service | URL |
-|---------|-----|
-| Dashboard | http://localhost:3000 |
-| Proxy (point your agent here) | http://localhost:8787/v1 |
-| Control API | http://localhost:8788 |
-| Logto (OIDC) | http://localhost:3001 |
-| Logto Admin | http://localhost:3002 |
+| URL | Purpose |
+|-----|---------|
+| http://localhost:8787/v1 | Proxy (point your agent here) |
+| http://localhost:8788 | Control plane API |
+| http://localhost:3000 | Dashboard |
+| http://localhost:3001 | Logto (OIDC) |
+| http://localhost:3002 | Logto admin console (one-time setup) |
 
 Set your OpenAI client `base_url` to `http://localhost:8787/v1` and send requests with your usual `OPENAI_API_KEY`. Replayd records automatically.
 
-Docker runs Postgres for the relational index, MinIO for blob storage, and a one-shot migrate job before the proxy and control plane start. Copy [`.env.example`](.env.example) if you want to override defaults.
+Docker runs Postgres for the relational index, MinIO for blob storage, and a one-shot migrate job before the proxy and control plane start. Copy `.env.example` if you want to override defaults. To use a different upstream provider, set `UPSTREAM_BASE_URL` on the `proxy` service in `docker-compose.yml` (Azure OpenAI, a local vLLM server, etc.).
 
-To use a different upstream provider, set `UPSTREAM_BASE_URL` on the `proxy` service in `docker-compose.yml` (Azure OpenAI, a local vLLM server, etc.).
-
-## One-time Logto setup
-
-Human login on the dashboard needs a few minutes of Logto configuration after the first `docker compose up`:
+**One-time Logto setup** (for dashboard login):
 
 1. Open http://localhost:3002 and create the admin account.
 2. Create an **API Resource** with identifier `http://localhost:8788` (must match `OIDC_AUDIENCE`).
@@ -38,82 +57,21 @@ Human login on the dashboard needs a few minutes of Logto configuration after th
    - Redirect URI: `http://localhost:3000/api/auth/callback/oidc`
    - Post sign-out redirect: `http://localhost:3000`
    - Grant access to the API Resource from step 2.
-4. Put the app ID and secret in your environment (see `.env.example`), then restart the dashboard service.
+4. Put the app ID and secret in your environment (`AUTH_OIDC_ID`, `AUTH_OIDC_SECRET`), then restart the dashboard service.
 
 Verify control-plane connectivity:
 
 ```bash
-python -m replayd.check_oidc
+replayd-check-oidc
+# or
+curl http://localhost:8788/health/oidc
 ```
 
-Or hit `GET http://localhost:8788/health/oidc`.
+**Docker OIDC gotcha:** tokens use `iss` = `http://localhost:3001/oidc` (`OIDC_ISSUER`), but the control plane fetches JWKS from the internal URL `http://logto:3001/oidc/jwks` (`OIDC_JWKS_URL`). Same split for the dashboard: public issuer for browser redirects, internal issuer for server-side token exchange. The proxy uses ingest keys, not OIDC.
 
-**Docker OIDC gotcha:** tokens use `iss` = `http://localhost:3001/oidc` (`OIDC_ISSUER`), but the control plane fetches JWKS from the internal URL `http://logto:3001/oidc/jwks` (`OIDC_JWKS_URL`). Same split for the dashboard: public issuer for browser redirects, internal issuer for server-side token exchange.
+## Local development (no Docker)
 
-The proxy uses project ingest keys, not OIDC. Only the control plane validates JWTs.
-
-## Grouping steps into runs
-
-A **run** is an ordered sequence of exchanges sharing a run ID. Send the same header on every request in a task:
-
-```
-x-replayd-run-id: my-task-abc123
-```
-
-If you omit it, each exchange becomes its own singleton run. The proxy stays transparent either way.
-
-## Replay, branch, and regression tests
-
-**Sandbox replay** re-runs your agent logic against recorded responses. No upstream calls, no API cost. Send the baseline run ID in the replay header:
-
-```
-x-replayd-replay: <run-id-to-replay>
-```
-
-If the request body does not match any recorded step, you get a divergence error.
-
-**Branch replay** replays matching steps from a parent run, then goes live on the first mismatch:
-
-```
-x-replayd-branch: <parent-run-id>
-x-replayd-run-id: <new-branch-run-id>
-```
-
-Useful when you want to change a prompt or model partway through without redoing earlier steps.
-
-**Regression tests** live in the dashboard under Tests. Save a run as a baseline, record a fresh candidate run of the same task, and compare. Semantic mode tolerates wording changes; exact mode requires byte-identical responses.
-
-Demo scripts in `scripts/` show record, replay, branch, and regression flows. They load `.env` automatically.
-
-## Control plane access
-
-Recorded runs contain real prompts and responses. Lock down the control plane in production.
-
-**OIDC (Logto, Docker default):** configure `OIDC_ISSUER`, `OIDC_JWKS_URL`, and `OIDC_AUDIENCE` on the control plane. Send `Authorization: Bearer <jwt>` with a Logto-issued access token.
-
-**Shared token:** set `REPLAYD_API_TOKEN` on the control plane. When set (and no valid JWT is present), every `/api/*` request needs:
-
-```
-Authorization: Bearer <token>
-```
-
-(or `X-Replayd-Token: <token>`). `/health` and `/health/oidc` stay public.
-
-If neither OIDC nor `REPLAYD_API_TOKEN` is configured, the API runs open with a warning logged at startup. Fine for local dev, not for production.
-
-The dashboard uses Auth.js OIDC login when configured. Without OIDC env vars it runs fully open and talks directly to the control plane.
-
-## Project ingest keys
-
-Agents authenticate to the proxy with project ingest keys, not JWTs. Create keys in the dashboard under Keys and send:
-
-```
-x-replayd-key: rpd_...
-```
-
-By default, a missing or invalid key falls back to the default project and the request still forwards. Set `REQUIRE_INGEST_KEY=true` on the proxy to reject bad keys with 401 before calling upstream.
-
-## Local development (without Docker)
+Requires Python 3.12+.
 
 ```bash
 python -m venv .venv
@@ -127,16 +85,19 @@ source .venv/bin/activate
 pip install -e ".[dev]"
 ```
 
-Copy `.env.example` to `.env` if you want local overrides. Without `DATABASE_URL`, Replayd uses SQLite at `{STORAGE_DIR}/replayd.db`. Without S3 config, blobs stay on the filesystem at `{STORAGE_DIR}/blobs/`.
-
-Start the data plane and control plane in separate terminals:
+Start the proxy and control plane in separate terminals:
 
 ```bash
+# Terminal 1: data plane
 uvicorn replayd.main:app --host 127.0.0.1 --port 8787
+
+# Terminal 2: control plane
 uvicorn replayd.management:app --host 127.0.0.1 --port 8788
 ```
 
-Dashboard:
+By default this uses SQLite at `./data/replayd.db` and stores blobs under `./data/blobs/`. Migrations run automatically on startup. No auth is required in this mode (the control plane runs open). Copy `.env.example` to `.env` if you want local overrides.
+
+Optional dashboard:
 
 ```bash
 cd web
@@ -144,18 +105,148 @@ npm install
 npm run dev
 ```
 
-Run tests:
+Set `NEXT_PUBLIC_REPLAYD_API_URL=http://localhost:8788` so the dashboard talks to your local control plane.
+
+## Pointing an agent at the proxy
+
+Set the OpenAI SDK base URL to the proxy and keep using your normal provider API key:
+
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    api_key=os.environ["OPENAI_API_KEY"],
+    base_url="http://localhost:8787/v1",
+    default_headers={
+        "x-replayd-run-id": "my-run-abc123",  # optional but recommended
+    },
+)
+```
+
+If you omit `x-replayd-run-id`, each exchange becomes its own singleton run. With a shared run id, all steps in an agent session are grouped together and ordered by timestamp.
+
+Demo scripts in `scripts/` show multi-step recording, replay, and branch workflows:
 
 ```bash
+# Record a multi-step run
+python scripts/demo_agent.py
+
+# Replay a run in sandbox mode (no upstream calls)
+REPLAYD_REPLAY_RUN_ID=<run_id> python scripts/replay_agent.py
+
+# Branch from a parent run (replay matched steps, go live on divergence)
+REPLAYD_BRANCH_RUN_ID=<parent_run_id> REPLAYD_RUN_ID=<new_run_id> python scripts/branch_agent.py
+```
+
+## Control headers
+
+All `x-replayd-*` headers are stripped before the request reaches the upstream provider.
+
+| Header | Purpose |
+|--------|---------|
+| `x-replayd-run-id` | Groups exchanges into a run. Auto-generated if missing. |
+| `x-replayd-replay` | Sandbox replay mode. Set to a baseline run id. No upstream call. |
+| `x-replayd-branch` | Branch mode. Set to a parent run id. Replays matches, forwards misses live. |
+| `x-replayd-key` | Project ingest key (`rpd_...`) for multi-tenant attribution. |
+
+### Replay modes
+
+**Forward (default)**  
+Proxy the request upstream, stream the response back, capture everything.
+
+**Replay** (`x-replayd-replay: <run_id>`)  
+Match the incoming request against a recorded step in that run (by request body hash). Return the saved response byte-for-byte. No upstream call. A request with no match is a divergence (HTTP 422).
+
+**Branch** (`x-replayd-branch: <parent_run_id>`)  
+For each request, try to match a step in the parent run. On match, serve the recorded response. On miss, forward live to upstream. Every step is captured into a new run (from `x-replayd-run-id`), with `parent_run_id` pointing at the parent. The first live step is the divergence point.
+
+## Regression tests
+
+Create a test in the control plane that references a baseline run, then compare a candidate run against it:
+
+```bash
+# Create a test (via API or dashboard), then run it
+curl -X POST http://localhost:8788/api/tests \
+  -H "Content-Type: application/json" \
+  -d '{"name": "my-agent-smoke", "baseline_run_id": "<run_id>", "mode": "semantic"}'
+
+curl -X POST "http://localhost:8788/api/tests/<test_id>/run" \
+  -H "Content-Type: application/json" \
+  -d '{"candidate_run_id": "<candidate_run_id>"}'
+```
+
+Two comparison modes:
+
+- **exact**: byte-for-byte request and response body hash comparison, step by step.
+- **semantic**: compares structural decisions (model, message roles, tool names, argument keys, finish_reason). Wording-only differences are tolerated.
+
+For CI, use the bundled CLI:
+
+```bash
+replayd-test <test_id> --candidate-run-id <run_id>
+# or re-run an agent through the proxy first:
+replayd-test <test_id> -- python scripts/demo_agent.py
+```
+
+Set `REPLAYD_API_TOKEN` when the control plane requires auth. Exit code 0 means pass, 1 means fail, 2 means error.
+
+## Multi-tenancy and auth
+
+**Data plane (agents):** pass a project ingest key in `x-replayd-key`. Keys are `rpd_` tokens stored hashed. By default, missing or invalid keys fall back to the default project and the request still goes through. Set `REQUIRE_INGEST_KEY=true` to reject bad keys with 401.
+
+**Control plane (humans):** OIDC via Logto (or any compatible provider) plus an optional shared `REPLAYD_API_TOKEN` for CI/service access. When neither is configured, the API runs open (dev mode). Recorded runs contain real prompts and responses, so lock down the control plane in production. The dashboard uses Auth.js OIDC login when configured; without OIDC env vars it runs open and talks directly to the control plane.
+
+Hierarchy: Organization → Project → runs, tests, ingest keys. Users join orgs via membership (owner, admin, member, viewer).
+
+## Configuration
+
+All settings come from environment variables (see `src/replayd/config.py`). Common ones:
+
+| Variable | Default | Notes |
+|----------|---------|-------|
+| `UPSTREAM_BASE_URL` | `https://api.openai.com` | Change for Azure, vLLM, etc. |
+| `LISTEN_PORT` | `8787` | Proxy port |
+| `MGMT_PORT` | `8788` | Control plane port |
+| `STORAGE_DIR` | `./data` | SQLite path and filesystem blobs |
+| `DATABASE_URL` | (unset) | Set for Postgres (`postgresql+asyncpg://...`) |
+| `BLOB_STORAGE_BACKEND` | `filesystem` | Set to `s3` for MinIO/AWS |
+| `CAPTURE_ENABLED` | `true` | Toggle capture on the proxy |
+| `RUN_MIGRATIONS_ON_STARTUP` | `true` | Disable in Docker (use the `migrate` service) |
+| `OIDC_ISSUER` | (unset) | Control plane OIDC |
+| `OIDC_JWKS_URL` | (unset) | Internal JWKS URL (important in Docker) |
+| `OIDC_AUDIENCE` | (unset) | API resource identifier |
+| `REPLAYD_API_TOKEN` | (unset) | Shared bearer token for CI |
+
+**Docker OIDC gotcha:** `OIDC_ISSUER` must match the token's `iss` claim (browser-facing, e.g. `http://localhost:3001/oidc`). `OIDC_JWKS_URL` must be reachable from inside the control-plane container (e.g. `http://logto:3001/oidc/jwks`).
+
+## Project layout
+
+```
+src/replayd/          Python package (proxy, control plane, storage, auth, testing)
+web/                  Next.js dashboard
+tests/                pytest suite
+scripts/              Demo agents and utilities
+docker/               Backend Dockerfile, Postgres init
+docker-compose.yml    Production-shaped local deployment
+```
+
+## Running tests
+
+```bash
+pip install -e ".[dev]"
 pytest
 ```
 
-Tests use SQLite by default. To also run storage and migration tests against Postgres, start a Postgres instance and set `REPLAYD_TEST_DATABASE_URL` (see `.env.example`).
+Tests cover proxy routing, capture, replay, branch, regression (exact and semantic), storage on SQLite and Postgres, blob backends, migrations, auth, RBAC, and the management API. To run storage and migration tests against Postgres, start a Postgres instance and set `REPLAYD_TEST_DATABASE_URL` (see `.env.example`).
 
-## CLI
+## CLI tools
 
-```bash
-replayd-migrate          # run Alembic migrations
-replayd-check-oidc       # verify OIDC/JWKS connectivity
-replayd-test             # run regression tests from the command line
-```
+| Command | Purpose |
+|---------|---------|
+| `replayd-migrate` | Run Alembic migrations |
+| `replayd-check-oidc` | Verify OIDC/JWKS connectivity |
+| `replayd-test` | Run a saved regression test from CI |
+
+## License
+
+See the repository for license details.
