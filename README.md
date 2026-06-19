@@ -4,8 +4,6 @@ Replayd is a recording proxy for LLM agents. Point your agent at it instead of t
 
 Your agent keeps sending its own provider API key. Replayd forwards it upstream and never stores or bills for model usage. Sensitive headers are redacted from what gets persisted.
 
-For a deeper look at how the system works, see [ProjectDescription.md](ProjectDescription.md).
-
 ## Quickstart with Docker
 
 You need [Docker Desktop](https://www.docker.com/products/docker-desktop/) (or Docker Engine + Compose).
