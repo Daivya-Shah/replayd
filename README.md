@@ -1,131 +1,131 @@
 # Replayd
 
-Replayd is a transparent recording proxy for LLM agents. Point your agent at it instead of the provider API and every request/response is captured losslessly. Use the dashboard to inspect runs, deterministically replay them, branch from a divergence point, and regression-test behavior over time. Bring-your-own-key: your agent sends its own provider API key on each request; Replayd forwards it upstream and **never stores or bills for model usage** (sensitive headers are redacted from persisted records).
+Replayd is a recording proxy for LLM agents. Point your agent at it instead of the provider API and every request and response gets captured losslessly. From there you can inspect runs in the dashboard, replay them deterministically, branch off at a divergence point, and regression-test behavior as your agent evolves.
 
-## Quickstart (Docker)
+Your agent keeps using its own provider API key. Replayd forwards it upstream, redacts sensitive headers from stored records, and never bills you for model usage. The whole stack is self-hostable.
 
-Requires [Docker Desktop](https://www.docker.com/products/docker-desktop/) (or Docker Engine + Compose).
+For a deeper conceptual overview, see [ProjectDescription.md](ProjectDescription.md).
+
+## Quickstart with Docker
+
+You need [Docker Desktop](https://www.docker.com/products/docker-desktop/) or Docker Engine with Compose.
 
 ```bash
 docker compose up --build
 ```
 
-| Service | URL |
-|---------|-----|
-| Dashboard | http://localhost:3000 |
-| Proxy (point your agent here) | http://localhost:8787/v1 |
-| Control API | http://localhost:8788 |
-| Logto (OIDC / auth API) | http://localhost:3001 |
-| Logto Admin Console | http://localhost:3002 |
+Once everything is up:
 
-Set your OpenAI client `base_url` to `http://localhost:8787/v1` and send requests with your usual `OPENAI_API_KEY`. Replayd records automatically.
+- **Dashboard:** http://localhost:3000
+- **Proxy (point your agent here):** http://localhost:8787/v1
+- **Control API:** http://localhost:8788
+- **Logto (OIDC):** http://localhost:3001
+- **Logto admin console:** http://localhost:3002
 
-**Storage in Docker:** the relational index lives in **Postgres 16** (`DATABASE_URL=postgresql+asyncpg://replayd:replayd@postgres:5432/replayd` by default). Request/response bodies are stored in **MinIO** (S3-compatible) via `BLOB_STORAGE_BACKEND=s3` — the `minio` service on port 9000 (console on 9001). A one-shot **`migrate`** service runs `replayd-migrate` after Postgres is healthy and before the proxy and control-plane start (`RUN_MIGRATIONS_ON_STARTUP=false`). `S3BlobStore.init()` creates the `replayd` bucket if needed.
+Set your OpenAI client `base_url` to `http://localhost:8787/v1` and send requests with your usual `OPENAI_API_KEY`. Recording happens automatically.
 
-**Identity (Logto):** Docker Compose bundles **Logto** as the self-hosted OIDC provider. Logto uses a separate Postgres database (`logto`) on the same `postgres` service. A one-shot **`logto-db-init`** service creates that database if it is missing; Logto seeds its own schema on first start.
+Under the hood, Docker Compose runs Postgres for the relational index, MinIO for request/response bodies, and Logto for identity. A one-shot migrate job runs before the proxy and control plane start. See [`.env.example`](.env.example) if you want to override Postgres, MinIO, or blob settings.
 
-Override Postgres, MinIO, Logto, or blob settings via environment variables — see [`.env.example`](.env.example). Defaults work for a first `docker compose up --build`, but OIDC requires a **one-time Logto console setup** (below) before human JWT login works.
+The stack will boot without extra configuration, but dashboard login requires a one-time Logto setup (below).
 
-## One-time Logto setup (OIDC)
+## One-time Logto setup
 
-After `docker compose up --build`:
+If you want to sign into the dashboard with OIDC, do this once after `docker compose up --build`:
 
-1. Open the **Logto Admin Console** at http://localhost:3002 and create the initial admin account.
-2. Create an **API Resource** for the Replayd control-plane API. Set its **API identifier** to `http://localhost:8788` (must match `OIDC_AUDIENCE` / `AUTH_OIDC_AUDIENCE`).
+1. Open http://localhost:3002 and create the Logto admin account.
+2. Create an **API Resource** with identifier `http://localhost:8788`. This must match `OIDC_AUDIENCE` and `AUTH_OIDC_AUDIENCE`.
 3. Create a **Traditional Web Application** for the dashboard:
-   - **Redirect URI:** `http://localhost:3000/api/auth/callback/oidc`
-   - **Post sign-out redirect URI:** `http://localhost:3000`
-   - Grant the application access to the API Resource from step 2.
-   - Copy the **App ID** and **App secret** into your environment (see below).
-4. Set dashboard auth env (`.env` or shell before `docker compose up`):
+   - Redirect URI: `http://localhost:3000/api/auth/callback/oidc`
+   - Post sign-out redirect URI: `http://localhost:3000`
+   - Grant it access to the API Resource from step 2
+   - Copy the App ID and App secret
+4. Put these in a `.env` file (or export them before `docker compose up`):
 
-   | Variable | Example | Purpose |
-   |----------|---------|---------|
-   | `AUTH_SECRET` | output of `openssl rand -base64 32` | Auth.js session encryption |
-   | `AUTH_URL` | `http://localhost:3000` | Dashboard public URL (Auth.js) |
-   | `AUTH_OIDC_ISSUER` | `http://localhost:3001/oidc` | Public issuer (browser redirect + id_token `iss`) |
-   | `AUTH_OIDC_INTERNAL_ISSUER` | `http://logto:3001/oidc` | Internal issuer for server-side token/JWKS calls |
-   | `AUTH_OIDC_ID` | from Logto app | OAuth client id |
-   | `AUTH_OIDC_SECRET` | from Logto app | OAuth client secret |
-   | `AUTH_OIDC_AUDIENCE` | `http://localhost:8788` | API resource indicator (RFC 8707 `resource` param) |
+   - `AUTH_SECRET` - generate with `openssl rand -base64 32`
+   - `AUTH_URL` - `http://localhost:3000`
+   - `AUTH_OIDC_ISSUER` - `http://localhost:3001/oidc` (public, browser-facing)
+   - `AUTH_OIDC_INTERNAL_ISSUER` - `http://logto:3001/oidc` (internal, for server-side token calls)
+   - `AUTH_OIDC_ID` and `AUTH_OIDC_SECRET` - from the Logto app
+   - `AUTH_OIDC_AUDIENCE` - `http://localhost:8788`
 
-5. Verify control-plane ↔ Logto connectivity:
+5. Restart compose, then verify OIDC connectivity:
 
    ```bash
    python -m replayd.check_oidc
    ```
 
-   Or `GET http://localhost:8788/health/oidc`.
+   Or hit `GET http://localhost:8788/health/oidc`.
 
-6. Open http://localhost:3000 and sign in with OIDC. The dashboard requests the API resource so Logto issues an **access token** with `aud == OIDC_AUDIENCE`; the server-side `/api/replayd` proxy attaches it to control-plane calls.
+6. Open http://localhost:3000 and sign in.
 
-**Docker OIDC gotcha (control plane):** tokens use `iss` = `http://localhost:3001/oidc` (`OIDC_ISSUER`). The control-plane fetches JWKS from the internal URL `http://logto:3001/oidc/jwks` (`OIDC_JWKS_URL`). Do not point `OIDC_JWKS_URL` at `localhost` from inside Docker.
+The dashboard requests the API resource so Logto issues an access token with the right audience. Server-side calls go through `/api/replayd`, which attaches that token to control-plane requests.
 
-**Docker OIDC gotcha (dashboard):** Auth.js runs server-side inside the dashboard container. `AUTH_OIDC_ISSUER` stays public (`http://localhost:3001/oidc`) for the browser authorization redirect and id_token `iss` validation. Server-side token exchange, userinfo, and JWKS use `AUTH_OIDC_INTERNAL_ISSUER` (`http://logto:3001/oidc` by default). API calls in OIDC mode go through the dashboard's `/api/replayd` proxy, which forwards server-side to `CONTROL_PLANE_URL` (`http://control-plane:8788` by default — internal Docker DNS, not `localhost:8788`).
+**A common Docker gotcha:** JWT `iss` must be the browser-facing issuer (`http://localhost:3001/oidc`), but JWKS fetching from inside containers must use internal DNS (`http://logto:3001/oidc/jwks`). Same idea on the dashboard side: public issuer for browser redirects, internal issuer for token exchange. Do not point internal JWKS URLs at `localhost` from inside Docker.
 
-| Variable | Default (Docker) | Purpose |
-|----------|------------------|---------|
-| `OIDC_ISSUER` | `http://localhost:3001/oidc` | Must match JWT `iss` (control-plane) |
-| `OIDC_JWKS_URL` | `http://logto:3001/oidc/jwks` | Internal JWKS URL (control-plane) |
-| `AUTH_OIDC_ISSUER` | `http://localhost:3001/oidc` | Public issuer (dashboard browser + id_token) |
-| `AUTH_OIDC_INTERNAL_ISSUER` | `http://logto:3001/oidc` | Internal issuer (dashboard server-side OIDC) |
-| `CONTROL_PLANE_URL` | `http://control-plane:8788` | Internal control-plane URL (dashboard `/api/replayd` proxy) |
-| `OIDC_AUDIENCE` | `http://localhost:8788` | API resource indicator |
-| `OIDC_ALGORITHMS` | `ES384,RS256` | Accepted JWT signing algorithms (Logto uses ES384) |
+The proxy itself uses project ingest keys, not OIDC. Only the control plane validates human JWTs.
 
-**Dev mode (no OIDC):** omit `AUTH_OIDC_*` and set `NEXT_PUBLIC_OIDC_ENABLED=false` (default for local `npm run dev`). The dashboard is fully open with no login; API calls go directly to `NEXT_PUBLIC_REPLAYD_API_URL`.
+**Skip OIDC for local dashboard dev:** omit the `AUTH_OIDC_*` vars and set `NEXT_PUBLIC_OIDC_ENABLED=false`. The dashboard runs open with no login and talks directly to the control API.
 
-The proxy uses **project ingest keys**, not OIDC — only the control-plane validates JWTs.
+## Control plane authentication
 
-To use a different upstream provider, set `UPSTREAM_BASE_URL` on the `proxy` service in `docker-compose.yml` (e.g. an Azure OpenAI endpoint or a local OpenAI-compatible server).
+Recorded runs contain real prompts and responses. Lock down the control plane in production.
 
-## Control plane access token
+**OIDC (Logto in Docker):** configure `OIDC_ISSUER`, `OIDC_JWKS_URL`, and `OIDC_AUDIENCE` on the control-plane service. Send `Authorization: Bearer <jwt>` with a Logto-issued access token.
 
-Recorded runs contain real prompts and responses. Authentication options:
-
-- **OIDC (Logto, Docker default):** configure `OIDC_ISSUER`, `OIDC_JWKS_URL`, and `OIDC_AUDIENCE` on the control-plane (see One-time Logto setup above). Send `Authorization: Bearer <jwt>` from a Logto-issued access token.
-- **Shared token:** set `REPLAYD_API_TOKEN` on the **control-plane** service. When set (and no valid JWT is presented), every `/api/*` request must include:
+**Shared token:** set `REPLAYD_API_TOKEN` on the control-plane service. When set, every `/api/*` request needs:
 
 ```
 Authorization: Bearer <token>
 ```
 
-(or `X-Replayd-Token: <token>`). `/health` and `/health/oidc` stay public. If neither OIDC nor `REPLAYD_API_TOKEN` is configured, the API runs unauthenticated (convenient for dev; a warning is logged at startup).
+You can also use `X-Replayd-Token: <token>`. `/health` and `/health/oidc` stay public.
 
-The dashboard uses **Auth.js OIDC login** when configured (see One-time Logto setup). In dev mode (OIDC unset), the dashboard is open with no login.
+**Dev mode:** if neither OIDC nor `REPLAYD_API_TOKEN` is configured, the API runs unauthenticated. Convenient for local work; a warning is logged at startup.
 
 ## Grouping steps into runs
 
-A **run** is an ordered sequence of exchanges sharing a `run_id`. Send the same header on every request of a task:
+A run is an ordered sequence of exchanges that share a run ID. Send the same header on every request in a task:
 
 ```
-x-replayd-run-id: <your-run-id>
+x-replayd-run-id: my-task-001
 ```
 
-If the header is absent, each exchange becomes its own singleton run (the proxy stays transparent).
+If you omit it, each exchange becomes its own singleton run. The proxy stays transparent either way.
 
 ## Replay, branch, and regression tests
 
-**Sandbox replay** — re-run agent logic against recorded responses (no upstream calls):
+**Sandbox replay** re-runs your agent against recorded responses with no upstream calls:
 
 ```
 x-replayd-replay: <run-id-to-replay>
 ```
 
-**Branch replay** — replay matching steps from a parent run, then go live on divergence:
+**Branch replay** replays matching steps from a parent run, then goes live when something diverges:
 
 ```
 x-replayd-branch: <parent-run-id>
 x-replayd-run-id: <new-branch-run-id>
 ```
 
-**Regression tests** — in the dashboard (**Tests**), save a run as a baseline test, record a fresh candidate run of the same task, and compare. Semantic mode tolerates wording changes; exact mode requires byte-identical responses.
+**Regression tests** live in the dashboard under Tests. Save a run as a baseline, record a fresh candidate run of the same task, and compare. Semantic mode tolerates wording changes; exact mode requires byte-identical responses.
+
+## Project ingest keys
+
+To attribute agent traffic to a project, create an ingest key in the dashboard (Keys page) and send it on proxy requests:
+
+```
+x-replayd-key: rpd_...
+```
+
+By default, a missing or invalid key falls back to the default project and the request still goes through. Set `REQUIRE_INGEST_KEY=true` on the proxy if you want to reject bad keys with 401.
 
 ## Bring your own key
 
-Replayd does not hold provider credentials. Your agent (or SDK) attaches its API key to each request; the proxy forwards it to `UPSTREAM_BASE_URL` and redacts it from stored capture metadata. You are always billed by your provider, not by Replayd.
+Replayd does not hold provider credentials. Your agent attaches its API key to each request; the proxy forwards it to `UPSTREAM_BASE_URL` and redacts it from stored metadata. You are always billed by your provider, not by Replayd.
 
-## Development (without Docker)
+To point at a different upstream (Azure OpenAI, a local vLLM server, etc.), change `UPSTREAM_BASE_URL` on the proxy service in `docker-compose.yml`.
+
+## Local development (without Docker)
 
 ```bash
 python -m venv .venv
@@ -139,7 +139,7 @@ source .venv/bin/activate
 pip install -e ".[dev]"
 ```
 
-Copy [`.env.example`](.env.example) to `.env` if you want local overrides. **Without `DATABASE_URL`**, Replayd uses **SQLite** at `{STORAGE_DIR}/replayd.db`. **Without `BLOB_STORAGE_BACKEND=s3`**, blobs stay on the **local filesystem** at `{STORAGE_DIR}/blobs/` (default for non-Docker dev).
+Copy [`.env.example`](.env.example) to `.env` for local overrides. Without `DATABASE_URL`, Replayd uses SQLite at `{STORAGE_DIR}/replayd.db`. Without `BLOB_STORAGE_BACKEND=s3`, blobs stay on the filesystem at `{STORAGE_DIR}/blobs/`.
 
 Start the data plane and control plane in separate terminals:
 
@@ -148,7 +148,7 @@ uvicorn replayd.main:app --host 127.0.0.1 --port 8787
 uvicorn replayd.management:app --host 127.0.0.1 --port 8788
 ```
 
-Dashboard (dev):
+Dashboard:
 
 ```bash
 cd web
@@ -162,7 +162,7 @@ Run tests:
 pytest
 ```
 
-By default tests use **SQLite** only (fast, no Docker). To also run core storage/migration/replay/regression tests against Postgres, start a Postgres instance and set:
+By default, tests use SQLite only (fast, no Docker). To also run storage and migration tests against Postgres:
 
 ```bash
 # Windows PowerShell
@@ -170,4 +170,4 @@ $env:REPLAYD_TEST_DATABASE_URL="postgresql+asyncpg://replayd:replayd@localhost:5
 pytest
 ```
 
-Demo scripts (`scripts/demo_agent.py`, `scripts/regression_demo.py`, etc.) load `.env` automatically via `python-dotenv`.
+Demo scripts in `scripts/` (`demo_agent.py`, `regression_demo.py`, `branch_agent.py`, and others) load `.env` automatically.
