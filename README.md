@@ -1,18 +1,18 @@
 # Replayd
 
-A record-and-replay layer for LLM agents. Point your agent at Replayd instead of the provider API. Replayd forwards traffic transparently, saves every request and response, and lets you replay runs, branch from a parent recording, and compare behavior over time.
+Replayd is a record-and-replay layer for LLM agents. Point your agent at it instead of the provider API, and it forwards traffic like normal while saving every request and response. Later you can replay a run without calling the model, branch from an earlier recording, or compare two runs to catch regressions.
 
-You keep your own API keys. Replayd does not call models on your behalf outside of normal proxy forwarding, and the whole stack can run on your infrastructure.
+You keep your own API keys. Replayd only forwards traffic on your behalf. The whole stack runs on your infrastructure if you want it to.
 
-## Why it exists
+## Why we built this
 
-Agent runs are hard to debug. Logs rarely include full request and response bodies, re-running the same task often produces a different path, and there is no standard way to say "this run should behave like that one."
+Debugging agent runs is painful. Logs usually skip full request and response bodies. Re-running the same task often takes a different path. And there is no standard way to say "this run should behave like that one."
 
-Replayd treats an agent run like a flight recording. When something breaks, you can inspect the exact steps, replay them without calling the model again, fork from step three with a new prompt, or gate a deploy on a regression test.
+Replayd treats an agent run like a flight recording. When something breaks, you can inspect the exact steps, replay them without hitting the model again, fork from step three with a new prompt, or block a deploy behind a regression test.
 
 ## How it works
 
-Replayd sits between your agent and an OpenAI-compatible API (OpenAI, Anthropic via compatibility shims, Azure, local vLLM, and so on).
+Replayd sits between your agent and any OpenAI-compatible API. That covers OpenAI, Anthropic through compatibility shims, Azure, local vLLM, and similar setups.
 
 ```
 Agent  -->  Replayd proxy (:8787)  -->  Provider API
@@ -24,14 +24,14 @@ Agent  -->  Replayd proxy (:8787)  -->  Provider API
          Control plane (:8788)  <--  Dashboard (:3000)
 ```
 
-Two backend processes share storage:
+Two backend processes share the same storage:
 
-- **Data plane (proxy)** on port 8787. The hot path. Forwards requests, captures exchanges, handles replay and branch modes. Streaming responses pass through unchanged.
-- **Control plane** on port 8788. A read-only management API for runs, exchanges, regression tests, projects, and team settings. The dashboard talks to this, not to storage directly.
+- **Data plane (proxy)** on port 8787. This is the hot path. It forwards requests, captures exchanges, and handles replay and branch modes. Streaming responses pass through unchanged.
+- **Control plane** on port 8788. A management API for runs, exchanges, regression tests, projects, and team settings. The dashboard talks to this API, not to storage directly.
 
 ## Quick start (local)
 
-Requirements: Python 3.12+
+You need Python 3.12 or newer.
 
 ```bash
 python -m venv .venv
@@ -60,6 +60,7 @@ By default Replayd uses SQLite at `./data/replayd.db` and stores request/respons
 Point your OpenAI SDK (or any HTTP client) at the proxy:
 
 ```python
+import os
 from openai import OpenAI
 
 client = OpenAI(
@@ -69,15 +70,15 @@ client = OpenAI(
 )
 ```
 
-Or try the included demo script (requires `OPENAI_API_KEY`):
+Or try the included demo script. It needs `OPENAI_API_KEY` set:
 
 ```bash
 python scripts/demo_agent.py
 ```
 
-The script prints a run id. Use it with the other scripts in `scripts/` to replay, branch, or run a regression comparison.
+The script prints a run id. Use that with the other scripts in `scripts/` to replay, branch, or run a regression comparison.
 
-Browse recorded runs at `http://127.0.0.1:8788/api/runs` or start the dashboard (see below).
+Browse recorded runs at `http://127.0.0.1:8788/api/runs`, or start the dashboard (see below).
 
 ## Docker Compose
 
@@ -99,38 +100,38 @@ First-time OIDC setup:
 
 1. Open http://localhost:3002 and create a Logto admin account.
 2. Create an API Resource whose indicator matches `OIDC_AUDIENCE` (default `http://localhost:8788`).
-3. Verify connectivity: `replayd-check-oidc` or `GET http://localhost:8788/health/oidc`.
+3. Verify connectivity with `replayd-check-oidc` or `GET http://localhost:8788/health/oidc`.
 
 ## Control headers
 
-Replayd-specific headers are optional. Without them, the proxy still forwards traffic normally; each exchange just becomes its own single-step run.
+Replayd headers are optional. Without them the proxy still forwards traffic normally. Each exchange just becomes its own single-step run.
 
 All `x-replayd-*` headers are stripped before the request reaches the provider.
 
-| Header | Default name | Purpose |
-|--------|--------------|---------|
-| Run id | `x-replayd-run-id` | Group steps into one run |
-| Replay | `x-replayd-replay` | Target run id for sandbox replay (no upstream call) |
-| Branch | `x-replayd-branch` | Parent run id for replay-then-live branching |
-| Ingest key | `x-replayd-key` | Attribute traffic to a project |
+| Header     | Default name        | Purpose                                              |
+|------------|---------------------|------------------------------------------------------|
+| Run id     | `x-replayd-run-id`  | Group steps into one run                             |
+| Replay     | `x-replayd-replay`  | Target run id for sandbox replay (no upstream call)  |
+| Branch     | `x-replayd-branch`  | Parent run id for replay-then-live branching         |
+| Ingest key | `x-replayd-key`     | Attribute traffic to a project                       |
 
-Header names are configurable via environment variables (`RUN_ID_HEADER`, `REPLAY_HEADER`, `BRANCH_HEADER`, `INGEST_KEY_HEADER`).
+You can rename these via `RUN_ID_HEADER`, `REPLAY_HEADER`, `BRANCH_HEADER`, and `INGEST_KEY_HEADER`.
 
 ## Replay modes
 
 **Record (default).** Forward to the provider and capture the exchange. Responses stream through to the client exactly as the provider sent them.
 
-**Sandbox replay.** Set `x-replayd-replay` to a recorded run id. Replayd matches each incoming request to a stored step by request body hash and returns the recorded response bytes. No upstream call. An unmatched request returns a divergence error.
+**Sandbox replay.** Set `x-replayd-replay` to a recorded run id. Replayd matches each incoming request to a stored step by request body hash and returns the recorded response bytes. No upstream call. If nothing matches, you get a divergence error.
 
-**Branch.** Set `x-replayd-branch` to a parent run id. Matching steps are served from the recording; the first request that does not match goes live to the provider and gets captured. All steps land in a new run linked to the parent. The first live step is the divergence point.
+**Branch.** Set `x-replayd-branch` to a parent run id. Matching steps are served from the recording. The first request that does not match goes live to the provider and gets captured. All steps land in a new run linked to the parent. The first live step is the divergence point.
 
-Example:
+Examples:
 
 ```bash
 # Record
 python scripts/demo_agent.py
 
-# Replay (no API key needed beyond a dummy value)
+# Replay (a dummy API key is enough)
 REPLAYD_REPLAY_RUN_ID=<run-id> python scripts/replay_agent.py
 
 # Branch from a parent run
@@ -152,7 +153,7 @@ Comparison modes:
 - **exact**: request and response body hashes must match at every step.
 - **semantic**: compares structural decisions (model, message roles, finish reason, tool names, argument keys) and tolerates wording-only differences.
 
-Run a test from the CLI (useful in CI):
+Run a test from the CLI. This is handy in CI:
 
 ```bash
 # Compare against an existing candidate run
@@ -176,27 +177,27 @@ npm install
 npm run dev
 ```
 
-Set `NEXT_PUBLIC_REPLAYD_API_URL=http://127.0.0.1:8788` for open dev mode (no login). In Docker, OIDC login is enabled by default via Logto.
+Set `NEXT_PUBLIC_REPLAYD_API_URL=http://127.0.0.1:8788` for open dev mode with no login. In Docker, OIDC login is enabled by default through Logto.
 
-Pages include run lists, step-by-step run detail, exchange bodies, regression tests, ingest keys, and team management.
+The dashboard covers run lists, step-by-step run detail, exchange bodies, regression tests, ingest keys, and team management.
 
 ## Configuration
 
 All settings come from environment variables or a `.env` file. Common ones:
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `UPSTREAM_BASE_URL` | `https://api.openai.com` | Provider API base URL |
-| `LISTEN_PORT` | `8787` | Proxy port |
-| `MGMT_PORT` | `8788` | Control plane port |
-| `STORAGE_DIR` | `./data` | SQLite path and filesystem blob root |
-| `DATABASE_URL` | (unset) | Postgres URL; unset uses SQLite |
-| `BLOB_STORAGE_BACKEND` | `filesystem` | `filesystem` or `s3` |
-| `CAPTURE_ENABLED` | `true` | Toggle capture on the proxy |
-| `REQUIRE_INGEST_KEY` | `false` | Reject proxy traffic without a valid ingest key |
-| `OIDC_ISSUER` | (unset) | Enable OIDC auth on the control plane |
-| `OIDC_AUDIENCE` | (unset) | Expected JWT audience |
-| `REPLAYD_API_TOKEN` | (unset) | Shared bearer token for CI/service access |
+| Variable               | Default                  | Description                                      |
+|------------------------|--------------------------|--------------------------------------------------|
+| `UPSTREAM_BASE_URL`    | `https://api.openai.com` | Provider API base URL                            |
+| `LISTEN_PORT`          | `8787`                   | Proxy port                                       |
+| `MGMT_PORT`            | `8788`                   | Control plane port                               |
+| `STORAGE_DIR`          | `./data`                 | SQLite path and filesystem blob root             |
+| `DATABASE_URL`         | (unset)                  | Postgres URL; unset uses SQLite                  |
+| `BLOB_STORAGE_BACKEND` | `filesystem`             | `filesystem` or `s3`                             |
+| `CAPTURE_ENABLED`      | `true`                   | Toggle capture on the proxy                      |
+| `REQUIRE_INGEST_KEY`   | `false`                  | Reject proxy traffic without a valid ingest key  |
+| `OIDC_ISSUER`          | (unset)                  | Enable OIDC auth on the control plane            |
+| `OIDC_AUDIENCE`        | (unset)                  | Expected JWT audience                            |
+| `REPLAYD_API_TOKEN`    | (unset)                  | Shared bearer token for CI/service access        |
 
 See `src/replayd/config.py` for the full list.
 
@@ -234,22 +235,22 @@ replayd-migrate
 
 Useful scripts:
 
-| Script | What it does |
-|--------|--------------|
-| `scripts/demo_agent.py` | Record a multi-step run |
-| `scripts/replay_agent.py` | Sandbox replay of a run |
-| `scripts/branch_agent.py` | Branch from a parent run |
-| `scripts/regression_demo.py` | Record a candidate and compare to baseline |
-| `scripts/list_runs.py` | List runs from storage |
+| Script                        | What it does                                       |
+|-------------------------------|----------------------------------------------------|
+| `scripts/demo_agent.py`       | Record a multi-step run                            |
+| `scripts/replay_agent.py`     | Sandbox replay of a run                            |
+| `scripts/branch_agent.py`     | Branch from a parent run                           |
+| `scripts/regression_demo.py`  | Record a candidate and compare to baseline         |
+| `scripts/list_runs.py`        | List runs from storage                             |
 
-When you add or change dependencies in `pyproject.toml`, reinstall with `pip install -e .` in your venv before testing.
+If you add or change dependencies in `pyproject.toml`, reinstall with `pip install -e .` in your venv before testing.
 
 ## Multi-tenancy
 
-Data is organized as organizations containing projects. Runs, exchanges, and tests belong to a project. Users join an organization with a role (owner, admin, member, viewer).
+Data is organized as organizations containing projects. Runs, exchanges, and tests belong to a project. Users join an organization with a role: owner, admin, member, or viewer.
 
 Agents authenticate to the proxy with per-project ingest keys (`rpd_` tokens). Humans authenticate to the control plane with OIDC or a service token. Until you configure auth, everything lands in a default organization and project.
 
-## Core guarantee
+## The core guarantee
 
 Every step captured through the proxy in record mode is stored losslessly. Replay returns the recorded bytes, not a regenerated model response. That is what makes forensic inspection and deterministic sandbox replay possible.
